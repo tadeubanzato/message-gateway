@@ -5,7 +5,8 @@ uses the repository interface rather than importing a specific DB driver.
 
 from __future__ import annotations
 
-from fastapi import Header, HTTPException
+from fastapi import HTTPException, Security
+from fastapi.security import APIKeyHeader
 from starlette.status import HTTP_401_UNAUTHORIZED
 
 from app.db import get_repository
@@ -42,9 +43,19 @@ def authenticate(user_key: str | None, raw_token: str | None) -> dict | None:
     }
 
 
+_user_key_scheme = APIKeyHeader(
+    name="X-User-Key", auto_error=False, scheme_name="UserKey",
+    description="Your account identifier (starts with `gw_user_`). Sign in to the web app, open **API keys** and copy it from the top of the page. It does not change.",
+)
+_api_token_scheme = APIKeyHeader(
+    name="X-API-Token", auto_error=False, scheme_name="ApiToken",
+    description="Secret for one API key (starts with `gw_tok_`). On the **API keys** page, create a key and copy its token right away: it is shown only once. Lost it? Use Replace token.",
+)
+
+
 def require_api_key(
-    x_user_key: str | None = Header(default=None, alias="X-User-Key"),
-    x_api_token: str | None = Header(default=None, alias="X-API-Token"),
+    x_user_key: str | None = Security(_user_key_scheme),
+    x_api_token: str | None = Security(_api_token_scheme),
 ) -> dict:
     if not (x_user_key or "").strip() or not (x_api_token or "").strip():
         raise HTTPException(

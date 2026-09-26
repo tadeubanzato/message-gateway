@@ -5,8 +5,8 @@ import threading
 import time
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import Body, Depends, FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
@@ -21,7 +21,7 @@ from app.routes.portal import router as portal_router
 from app.routes.portal_ui import router as portal_ui_router
 from app.services import access, channels, message_log
 from app.version import APP_NAME, APP_VERSION
-from app.schemas import MessageEnqueued, MessageRequest, MessageResponse
+from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, MessageRequest, MessageResponse
 
 # The MCP server is served from this same FastAPI app (same port, path
 # /mcp) rather than run as a separate process/port. Two gotchas discovered
@@ -64,7 +64,66 @@ async def _lifespan(app: FastAPI):
         yield
 
 
-app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=_lifespan)
+API_DESCRIPTION = """
+Send **email, SMS and push notifications** through one API, using the providers you connected in the web app.
+
+## Authentication
+
+Every request must carry **two credentials**, sent as headers. You create both in the gateway's web app.
+
+| Header | What it is | Looks like |
+|---|---|---|
+| `X-User-Key` | Identifies your account. It never changes. | `gw_user_...` |
+| `X-API-Token` | The secret for one API key. Shown **once**, when created. | `gw_tok_...` |
+
+### Get your credentials
+
+1. Open the web app (the same address as this page, e.g. `http://localhost:8010/gateway`) and sign in.
+2. Go to **API keys** in the menu (`/gateway/keys`).
+3. Copy your **user key** from the top of the page.
+4. Under **Keys**, type a name for the program that will call the API (e.g. `my-website`) and click **Create key**.
+5. Copy the **token** right away. It is displayed only once.
+
+### How the exchange works
+
+There is no separate login call and no session: the two headers go on **every** request.
+The gateway looks up your account by `X-User-Key`, hashes the `X-API-Token` you sent and compares it with the
+stored hash of your active tokens. Only the hash is stored, never the token itself, so **a lost token can't be
+shown again**.
+
+```bash
+curl -X POST http://localhost:8010/v1/messages/sms \
+  -H "X-User-Key: gw_user_..." \
+  -H "X-API-Token: gw_tok_..." \
+  -H "Content-Type: application/json" \
+  -d '{"to": "+15551234567", "body": "Hello"}'
+```
+
+### Managing keys
+
+- **One key per program.** Each key has its own name and token, so you can revoke one without touching the others.
+- **Lost or leaked a token?** On the API keys page click **Replace token** (or create a key with the same name).
+  A new token is shown once and the old one **stops working immediately**.
+- **Delete** a key to revoke it for good.
+- Requests with a missing, wrong or revoked credential get `401 Unauthorized`.
+
+To try requests from this page, click **Authenticate** and enter both values.
+
+## Quick start
+
+Pick the endpoint for your channel: **Email**, **SMS** or **Push**. Email and SMS each have a plain-text endpoint and a template endpoint.
+Add `provider` to choose a specific connected provider; without it the channel's default is used.
+Delivery happens in the background and the response returns a `message_id`.
+"""
+
+API_TAGS = [
+    {"name": "Email", "description": "Send an email, as plain text or from a saved template."},
+    {"name": "SMS", "description": "Send a text message, as plain text or from a saved template."},
+    {"name": "Push", "description": "Send a push notification."},
+]
+
+app = FastAPI(title=APP_NAME, version=APP_VERSION, description=API_DESCRIPTION, openapi_tags=API_TAGS, lifespan=_lifespan,
+              docs_url=None, redoc_url=None)  # Scalar (/scalar) is the one API reference
 
 # The MCP endpoint requires the same API key and token as the HTTP API.
 app.add_middleware(McpAuthMiddleware)
@@ -142,12 +201,12 @@ def _validate_email_recipients_or_400(recipients: list[str]) -> None:
         )
 
 
-app.include_router(onboarding_router)
-app.include_router(portal_router)
-app.include_router(portal_ui_router)
+app.include_router(onboarding_router, include_in_schema=False)
+app.include_router(portal_router, include_in_schema=False)
+app.include_router(portal_ui_router, include_in_schema=False)
 
 
-@app.get("/health")
+@app.get("/health", include_in_schema=False, tags=["System"], summary="Health check")
 def health():
     repo_ok = False
     try:
@@ -160,9 +219,17 @@ def health():
     }
 
 
+@app.get("/docs", include_in_schema=False)
+def docs_redirect():
+    return RedirectResponse("/scalar", status_code=307)
+
+
 @app.get("/scalar", include_in_schema=False)
 def scalar_docs():
-    return get_scalar_api_reference(openapi_url=app.openapi_url, title=app.title, dark_mode=True)
+    return get_scalar_api_reference(
+        openapi_url=app.openapi_url, title=f"{app.title} API", dark_mode=True,
+        persist_auth=True, hide_models=True, default_open_all_tags=True, hide_download_button=True,
+    )
 
 
 @app.get("/get-started", response_class=HTMLResponse, include_in_schema=False)
@@ -195,18 +262,18 @@ def get_started():
       <pre><code id="prompt-text">{prompt}</code></pre>
       <button class="btn ghost sm" onclick="navigator.clipboard.writeText(document.getElementById('prompt-text').innerText)">Copy prompt</button>
     </div>
-    <p class="muted"><a href="/scalar">API reference</a> &middot; <a href="/docs">Swagger</a></p>
+    <p class="muted"><a href="/scalar">API reference</a></p>
   </main>
 </body>
 </html>"""
 
 
-@app.get("/v1/auth/whoami")
+@app.get("/v1/auth/whoami", include_in_schema=False, tags=["Auth"], summary="Check your credentials")
 def whoami(auth: dict = Depends(require_api_key)):
     return {"ok": True, "account_id": auth.get("account_id"), "user_key": auth.get("user_key")}
 
 
-@app.get("/v1/templates/sms/{template_name}")
+@app.get("/v1/templates/sms/{template_name}", include_in_schema=False, tags=["Templates"], summary="Get an SMS template")
 def get_sms_template_expected_context(template_name: str, auth: dict = Depends(require_api_key)):
     req = MessageRequest(channel="sms", to="+10000000000", body="x")
     text = _load_template_text(template_name, req=req)
@@ -217,7 +284,7 @@ def get_sms_template_expected_context(template_name: str, auth: dict = Depends(r
     }
 
 
-@app.get("/v1/templates/email/{template_name}")
+@app.get("/v1/templates/email/{template_name}", include_in_schema=False, tags=["Templates"], summary="Get an email template")
 def get_email_template_expected_context(template_name: str, auth: dict = Depends(require_api_key), emailType: str = "txt"):
     et = "html" if str(emailType).strip().lower() == "html" else "txt"
     req = MessageRequest(channel="email", to="x@y.z", subject="x", body="x", emailType=et)  # type: ignore[arg-type]
@@ -318,12 +385,155 @@ def enqueue_message(req: MessageRequest, account_id: Optional[str]) -> MessageRe
     return MessageResponse(status="queued", message_ids=message_ids, to_deduped=to_deduped_field, template=used_template)
 
 
-@app.post("/v1/messages", response_model=MessageResponse, response_model_exclude_none=True)
+_SEND_RESPONSES = {
+    400: {"description": "Invalid request (missing recipient, unknown provider, bad address...)."},
+    401: {"description": "Missing or invalid `X-User-Key` / `X-API-Token`."},
+    409: {"description": "No provider is connected for this channel yet. The administrator connects one in the web app."},
+}
+_SEND_DESC = ("Queues the message for delivery. It is validated and logged immediately, then delivered in the "
+              "background with retries. The response gives the `message_id`.")
+_TEMPLATE_RULES = (
+    "\n\nTemplates are plain files. Placeholders written as `{{ context.name }}` are replaced with the matching "
+    "value from `context`. A placeholder with no value fails the request with a 400 (unless the gateway runs with "
+    "`TEMPLATE_STRICT=false`, which fills it with an empty string). An unknown template name is also a 400."
+)
+_EMAIL_TEMPLATE_DESC = _SEND_DESC + _TEMPLATE_RULES + """
+
+Email templates live in `app/templates/email/` as `<name>.txt` and `<name>.html`. `emailType` decides which
+file is used, so provide both if you send both. `{{ context.key }}` also works in `subject`.
+
+### Template example
+
+The template file `app/templates/email/welcome.txt`:
+
+```
+Hello {{ context.name }},
+
+Welcome!
+
+Your account is now active.
+If you did not request this, you can safely ignore this email.
+```
+
+(`welcome.html` has the same content as HTML and is used when `emailType` is `html`.)
+
+The request:
+
+```json
+{
+  "to": "ana@example.com",
+  "subject": "Welcome, {{ context.name }}",
+  "template": "welcome",
+  "context": { "name": "Ana" }
+}
+```
+
+What Ana receives: subject `Welcome, Ana`, and the body `Hello Ana, Welcome! Your account is now active. ...`
+"""
+_SMS_TEMPLATE_DESC = _SEND_DESC + _TEMPLATE_RULES + """
+
+SMS templates live in `app/templates/sms/` as `<name>.txt`.
+
+### Template example
+
+The template file `app/templates/sms/welcome.txt`:
+
+```
+Hi {{ context.name }}, welcome! Your account is now active.
+```
+
+The request:
+
+```json
+{
+  "to": "+15551234567",
+  "template": "welcome",
+  "context": { "name": "Ana" }
+}
+```
+
+What is delivered: `Hi Ana, welcome! Your account is now active.`
+"""
+
+
+_PUSH_DESC = """
+
+### Set up push first
+
+Push needs a provider connected in the web app under **Channels > Push**. Two are supported:
+
+**Pushover** (needs a [pushover.net](https://pushover.net) account)
+- Your **user key** (from your Pushover dashboard) says *who* gets the notification.
+- An **app** says *which Pushover application* it is sent from. Create one at
+  [pushover.net/apps/build](https://pushover.net/apps/build). It gives you an **API token**.
+- In the web app, add each app with a **name** (your own label, e.g. `alerts` or `website`) and its API token.
+  One app is the **default**. Names are lowercase: 1 to 40 letters, numbers, dots, dashes or underscores.
+- In a request, `app` is that **name**, not the token. Leave it out to use the default app.
+  An unknown name returns a 400 with the list of valid names (`available_apps`).
+- `device` limits delivery to one of your devices by its Pushover device name. Leave it out to notify all of them.
+
+**ntfy** (free, no account)
+- You choose a **topic** name in the web app, and your phone subscribes to that topic in the ntfy app.
+- `app` and `device` are ignored.
+
+### Fields by provider
+
+| Field | Pushover | ntfy |
+|---|---|---|
+| `body` | message text | message text |
+| `subject` | notification title | notification title |
+| `url`, `url_title` | link with optional label | link opens on tap (`url_title` ignored) |
+| `app` | app **name** (default app if omitted) | ignored |
+| `device` | device name (all devices if omitted) | ignored |
+| `to` | override the recipient user or group key | override the topic |
+| `provider` | `pushover` | `ntfy` |
+
+Leave `to` out to use the recipient saved in the web app.
+"""
+
+
+def _post(path, tag, summary, description):
+    return app.post(path, response_model=MessageResponse, response_model_exclude_none=True,
+                    tags=[tag], summary=summary, description=description, responses=_SEND_RESPONSES)
+
+
+@_post("/v1/messages/email", "Email", "Send an email", _SEND_DESC)
+def send_email(req: EmailMessage = Body(examples=[{"to": "someone@example.com", "subject": "Hello", "body": "Hi there!"}]),
+               auth: dict = Depends(require_api_key)):
+    return enqueue_message(req.to_request(), auth.get("account_id"))
+
+
+@_post("/v1/messages/email/template", "Email", "Send an email from a template", _EMAIL_TEMPLATE_DESC)
+def send_email_template(req: EmailTemplateMessage = Body(examples=[{"to": "ana@example.com", "subject": "Welcome, {{ context.name }}", "template": "welcome", "context": {"name": "Ana"}}]),
+                        auth: dict = Depends(require_api_key)):
+    return enqueue_message(req.to_request(), auth.get("account_id"))
+
+
+@_post("/v1/messages/sms", "SMS", "Send an SMS", _SEND_DESC)
+def send_sms(req: SmsMessage = Body(examples=[{"to": "+15551234567", "body": "Running late, back soon."}]),
+             auth: dict = Depends(require_api_key)):
+    return enqueue_message(req.to_request(), auth.get("account_id"))
+
+
+@_post("/v1/messages/sms/template", "SMS", "Send an SMS from a template", _SMS_TEMPLATE_DESC)
+def send_sms_template(req: SmsTemplateMessage = Body(examples=[{"to": "+15551234567", "template": "welcome", "context": {"name": "Ana"}}]),
+                      auth: dict = Depends(require_api_key)):
+    return enqueue_message(req.to_request(), auth.get("account_id"))
+
+
+@_post("/v1/messages/push", "Push", "Send a push notification", _SEND_DESC + _PUSH_DESC)
+def send_push(req: PushMessage = Body(examples=[{"subject": "Deploy finished", "body": "Version 1.4 is live.", "app": "alerts"}]),
+              auth: dict = Depends(require_api_key)):
+    return enqueue_message(req.to_request(), auth.get("account_id"))
+
+
+# Generic endpoint kept for existing callers; the per-channel endpoints above are the documented API.
+@app.post("/v1/messages", include_in_schema=False, response_model=MessageResponse, response_model_exclude_none=True)
 def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
     return enqueue_message(req, auth.get("account_id"))
 
 
-@app.get("/v1/messages", tags=["Message log"], summary="List your sent messages")
+@app.get("/v1/messages", include_in_schema=False, tags=["Message log"], summary="List your sent messages", responses={401: {"description": "Missing or invalid credentials."}})
 def list_messages(
     channel: str | None = None,
     status: str | None = None,
@@ -337,7 +547,7 @@ def list_messages(
     return {"messages": [message_log.public_view(d) for d in docs]}
 
 
-@app.get("/v1/messages/{message_id}", tags=["Message log"], summary="Get one message and its delivery attempts")
+@app.get("/v1/messages/{message_id}", include_in_schema=False, tags=["Message log"], summary="Get one message and its delivery attempts")
 def get_message(message_id: str, auth: dict = Depends(require_api_key)):
     repo = get_repository()
     doc = repo.get_message(message_id)
@@ -350,7 +560,7 @@ def get_message(message_id: str, auth: dict = Depends(require_api_key)):
     return {**message_log.public_view(doc), "delivery_attempts": attempts}
 
 
-@app.get("/v1/providers", tags=["Providers"], summary="Which providers you can send with")
+@app.get("/v1/providers", include_in_schema=False, tags=["Providers"], summary="Which providers you can send with")
 def list_providers(auth: dict = Depends(require_api_key)):
     """For each channel, the connected providers and the default. Pass any of
     these as "provider" in POST /v1/messages to choose one per message."""

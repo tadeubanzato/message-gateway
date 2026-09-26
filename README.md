@@ -159,7 +159,12 @@ PUSHOVER_APPS=alerts:PUSHOVER_APPTOKEN_ALERTS,backups:PUSHOVER_APPTOKEN_BACKUPS
 
 ## 4. Send your first message
 
-Create keys on the **API keys** page (one per program that sends), then:
+Every request needs two headers: `X-User-Key` (your account, `gw_user_...`, never changes) and
+`X-API-Token` (the secret for one key, `gw_tok_...`). Get both from the web app: sign in, open
+**API keys**, copy your user key, create a key (one per program that sends) and copy its token
+straight away, because **it is shown only once** and only a hash is stored. Lost it? Click
+**Replace token**; the old one stops working immediately. There is no login call: the headers go on
+every request, and a wrong or revoked pair gets a `401`. Then:
 
 ```bash
 curl -X POST http://localhost:8010/v1/messages \
@@ -171,7 +176,7 @@ curl -X POST http://localhost:8010/v1/messages \
 
 | Channel | Fields |
 |---|---|
-| `push` | `body`; optional `subject` (title), `app`, `device`, `url`, `url_title` |
+| `push` | `body`; optional `subject` (title), `app` (Pushover app **name**), `device`, `url`, `url_title`, `to` |
 | `email` | `to`, `subject`, `body`; optional `emailType` (`txt` or `html`) |
 | `sms` | `body`; `to`, or omit it to use the default phone number |
 
@@ -179,13 +184,43 @@ Every channel also accepts:
 
 - **`provider`**: pick a connected provider for this message, e.g. `"provider": "sendgrid"`.
   Without it the channel's default is used.
-- **`template` + `context`**: use a server-side template instead of `body`.
+- **`template` + `context`** (email and SMS): use a saved template instead of `body`. See below.
+
+### Templates (email and SMS)
+
+Templates are plain files you keep in `app/templates/email/` (`<name>.txt` and/or `<name>.html`) and
+`app/templates/sms/` (`<name>.txt`). A template uses `{{ context.key }}` placeholders:
+
+```
+Hi {{ context.name }}, welcome! Your account is now active.
+```
+
+Send it by name, with the values in `context`:
+
+```json
+{ "to": "+15551234567", "template": "welcome", "context": { "name": "Ana" } }
+```
+
+Ana receives: `Hi Ana, welcome! Your account is now active.`
+
+For email, the same idea with a subject (placeholders work there too):
+
+```json
+{ "to": "ana@example.com", "subject": "Welcome, {{ context.name }}", "template": "welcome", "context": { "name": "Ana" } }
+```
+
+Ana receives the subject `Welcome, Ana` and the `welcome.txt` body with her name filled in. Add
+`"emailType": "html"` to use `welcome.html` instead.
+
+- **Email**: `emailType` picks the file (`html` uses `<name>.html`, otherwise `<name>.txt`), so provide
+  both files if you send both. Placeholders also work in `subject`.
+- **Strict by default**: a placeholder with no value in `context` returns a 400. Set
+  `TEMPLATE_STRICT=false` to fill it with an empty string instead. An unknown template name is a 400.
+- The folders are mounted into the container, so new templates are picked up without a rebuild.
+- Push notifications don't use templates; send `body` directly.
 
 `to` may be a list. If nothing is connected for the channel, the API answers immediately with
 a clear error instead of queueing a message that can't be delivered.
-
-Other endpoints: `GET /v1/providers` (what you can use), `GET /v1/messages` (your log),
-`GET /v1/messages/{id}` (one message with its delivery attempts).
 
 ## 5. Connect an AI agent (MCP)
 
@@ -286,9 +321,8 @@ then can't change it (the Channels page tells you when that happens).
 
 ### API documentation
 
-- Interactive: `http://localhost:8010/scalar`
-- Swagger: `http://localhost:8010/docs`
-- The **About** page in the app lists the main endpoints.
+The API reference is at **`http://localhost:8010/scalar`** (also linked from the **About** page). Click
+**Authenticate** to enter your user key and API token, then use **Test Request** on the send endpoint.
 
 ### Architecture
 
