@@ -1,0 +1,6 @@
+Hello {{ context.name }},
+
+Welcome!
+
+Your account is now active.
+If you did not request this, you can safely ignore this email.

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Relay Gateway Portal - Register</title>
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #111; margin: 0; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 24px; }
+      .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 16px 0; }
+      h1 { font-size: 22px; margin: 0 0 8px; }
+      .muted { color: #666; font-size: 12px; }
+      label { display:block; font-size: 12px; color:#666; margin: 12px 0 6px; }
+      input { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #ddd; font-size:14px; box-sizing:border-box; }
+      .btn { margin-top: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid #111; background: #111; color: #fff; cursor: pointer; font-size: 14px; }
+      .err { background: #fff3f3; border: 1px solid #ffd0d0; padding: 10px; border-radius: 10px; color: #8a0000; margin-bottom: 10px; font-size: 13px; }
+      .note { background:#f7f7f7; border:1px solid #e5e5e5; border-radius:10px; padding:10px; font-size:13px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrap">
+      <h1>Relay Gateway Portal</h1>
+      <div class="muted">Register</div>
+
+      <div class="card">
+        {% if error %}
+          <div class="err">{{ error }}</div>
+        {% endif %}
+
+        <div class="note">
+          This creates a new account and generates a token immediately.
+        </div>
+
+        <form method="post" action="/gateway/register" autocomplete="off">
+          <label>Name</label>
+          <input name="name" value="{{ name or '' }}" placeholder="Your name" />
+
+          <label>Email</label>
+          <input name="email" value="{{ email or '' }}" placeholder="you@example.com" />
+
+          <div class="row">
+            <div>
+              <label>Password</label>
+              <input type="password" name="password" placeholder="At least 8 characters" />
+            </div>
+            <div>
+              <label>Confirm Password</label>
+              <input type="password" name="password2" placeholder="Repeat password" />
+            </div>
+          </div>
+
+          <button class="btn" type="submit">Create account & generate token</button>
+        </form>
+      </div>
+    </div>
+  </body>
+</html>

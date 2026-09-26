@@ -1,0 +1,21 @@
+services:
+  gateway:
+    build: .
+    image: relay-gateway:local
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    ports:
+      - "8010:8000"     # HTTP API + portal + MCP server (all served by the same uvicorn process)
+      - "127.0.0.1:15672:15672"  # RabbitMQ management UI — localhost only
+
+    volumes:
+      - gateway_data:/app/data         # SQLite DB file (when DB_BACKEND=sqlite)
+      - rabbitmq_data:/data/rabbitmq   # RabbitMQ's own persistent state
+      - ./app/templates:/app/app/templates:ro
+
+volumes:
+  gateway_data:
+  rabbitmq_data:

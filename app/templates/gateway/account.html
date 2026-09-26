@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Relay Gateway Portal</title>
+
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #111; margin: 0; }
+      .wrap { max-width: 900px; margin: 0 auto; padding: 24px; }
+      .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 16px 0; }
+      h1 { font-size: 22px; margin: 0 0 8px; }
+      h2 { font-size: 16px; margin: 0 0 12px; }
+      .muted { color: #666; font-size: 12px; }
+      .note { background: #f7f7f7; border: 1px solid #e5e5e5; border-radius: 10px; padding: 10px; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+      .kv { display: grid; grid-template-columns: 140px 1fr; gap: 8px 14px; }
+      .kv .k { color: #666; font-size: 12px; }
+      .kv .v { font-size: 14px; }
+
+      .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+      .btn { padding: 8px 12px; border-radius: 8px; border: 1px solid #111; background: #111; color: #fff; cursor: pointer; }
+      .btn.secondary { background: #fff; color: #111; }
+      .btn[disabled] { opacity: 0.65; cursor: not-allowed; }
+
+      .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid #bfe7cf; background: #e9f7ef; color: #126b3a; font-size: 12px; }
+      .pill.gray { border-color: #ddd; background: #f3f3f3; color: #444; }
+
+      .token-box { border: 1px solid #ddd; border-radius: 12px; padding: 12px; background: #fff; }
+      .token-row { display: flex; align-items: center; gap: 10px; }
+      .token-text { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; }
+
+      .icon-btn {
+        width: 38px; height: 38px; border-radius: 10px; border: 1px solid #111;
+        background: #111; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
+      }
+      .icon-btn.secondary { background: #fff; color: #111; }
+      .icon-btn.danger { background: #fff; color: #a31717; border-color: #a31717; }
+      .icon-btn[disabled] { opacity: 0.65; cursor: not-allowed; }
+
+      .icon { width: 18px; height: 18px; display: block; }
+
+      .icon-btn[data-state="copied"] { background: #126b3a; border-color: #126b3a; color: #fff; }
+      .icon-btn .icon-copy { display: block; }
+      .icon-btn .icon-check { display: none; }
+      .icon-btn[data-state="copied"] .icon-copy { display: none; }
+      .icon-btn[data-state="copied"] .icon-check { display: block; }
+
+      .field { display: grid; gap: 6px; min-width: 280px; }
+      .label { font-size: 12px; color: #666; }
+      .input { height: 38px; border-radius: 10px; border: 1px solid #ddd; padding: 0 10px; font-size: 14px; outline: none; }
+      .input:focus { border-color: #111; }
+
+      .apps { border: 1px solid #e5e5e5; border-radius: 12px; overflow: hidden; background: #fff; }
+      .app-row { display: grid; grid-template-columns: 1fr 160px 220px 44px; align-items: center; gap: 10px; padding: 10px 12px; border-top: 1px solid #eee; }
+      .app-row:first-child { border-top: 0; }
+
+      .app-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .app-link { color: #111; text-decoration: none; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .app-link:hover { text-decoration: underline; }
+      .app-meta { color: #666; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      @media (max-width: 760px) {
+        .app-row { grid-template-columns: 1fr; gap: 6px; }
+        .app-actions { display: flex; justify-content: flex-end; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrap">
+      <h1>Relay Gateway Portal</h1>
+      <div class="muted">UTC now: {{ now_iso }}</div>
+
+      <div class="card">
+        <h2>Account</h2>
+        <div class="kv">
+          <div class="k">Name</div><div class="v">{{ name }}</div>
+          <div class="k">Email</div><div class="v">{{ email }}</div>
+          <div class="k">User Key</div><div class="v"><code>{{ user_key }}</code></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Applications (active)</h2>
+
+        <div class="note" style="margin-bottom:12px;">
+          <div>
+            Each application uses the same <code>X-User-Key</code> but its own <code>X-API-Token</code>.
+          </div>
+          <div class="muted" style="margin-top:4px;">
+            Raw tokens are shown once, right after you create or rotate them. You can rotate an app token any time.
+          </div>
+        </div>
+
+        {% if not active_apps or active_apps|length == 0 %}
+          <div class="muted">No active applications yet.</div>
+        {% else %}
+          <div class="apps" style="margin-bottom:12px;">
+            <div class="app-row" style="background:#fafafa; font-size:12px; color:#666; font-weight:600;">
+              <div>Application</div>
+              <div>Token</div>
+              <div>Created</div>
+              <div style="text-align:right;">Delete</div>
+            </div>
+
+            {% for a in active_apps %}
+              <div class="app-row">
+                <div class="app-name">
+                  {% if selected_app and selected_app == a.app %}
+                    <span class="pill">selected</span>
+                  {% else %}
+                    <span class="pill gray">active</span>
+                  {% endif %}
+                  <a class="app-link" href="/gateway/account?app={{ a.app }}">{{ a.app }}</a>
+                </div>
+
+                <div class="app-meta">
+                  <code>********{{ a.last4 }}</code>
+                </div>
+
+                <div class="app-meta">
+                  {{ a.created_at }}
+                </div>
+
+                <div class="app-actions" style="text-align:right;">
+                  <form method="post" action="/gateway/services/message-gateway/apps/revoke" onsubmit="return confirmDeleteApp(this);">
+                    <input type="hidden" name="app" value="{{ a.app }}" />
+                    <input type="hidden" name="next" value="/gateway/account{% if selected_app %}?app={{ selected_app }}{% endif %}" />
+                    <button class="icon-btn danger" type="submit" title="Delete application" aria-label="Delete application">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none">
+                        <path d="M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                    </button>
+                  </form>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <div class="row" style="margin-top:6px;">
+          <form method="post" action="/gateway/services/message-gateway/tokens" onsubmit="return disableSubmit(this);" class="row">
+            <input type="hidden" name="next" value="/gateway/account" />
+
+            <div class="field">
+              <div class="label">Create a new application token</div>
+              <input
+                class="input"
+                type="text"
+                name="app"
+                value=""
+                placeholder="new app name (e.g. mobile-app)"
+                autocomplete="off"
+                spellcheck="false"
+                required
+                minlength="2"
+                maxlength="40"
+                pattern="[a-zA-Z0-9._-]{2,40}"
+                title="Use 2–40 chars: letters, numbers, dot, underscore, dash."
+              />
+              <div class="muted">App names are unique. If you reuse a name, it rotates that app’s token.</div>
+            </div>
+
+            <button class="btn" type="submit">Create / rotate</button>
+          </form>
+        </div>
+
+        {% if selected_app %}
+          <div style="margin-top:16px;">
+            <h2 style="margin:0 0 10px;">Selected application</h2>
+
+            {% if not active_token %}
+              <div class="muted">No active token exists for <code>{{ selected_app }}</code>.</div>
+            {% else %}
+              <div class="kv" style="margin-bottom:12px;">
+                <div class="k">Application</div><div class="v"><span class="pill gray">{{ selected_app }}</span></div>
+                <div class="k">Status</div><div class="v"><span class="pill">active</span></div>
+                <div class="k">Created</div><div class="v">{{ active_token.created_at }}</div>
+              </div>
+
+              <div class="token-box">
+                <div class="token-row">
+                  <div class="token-text">
+                    <code>********{{ active_token.last4 }}</code>
+                  </div>
+
+                  <form method="post" action="/gateway/services/message-gateway/tokens" onsubmit="return disableSubmit(this);">
+                    <input type="hidden" name="next" value="/gateway/account?app={{ selected_app }}" />
+                    <input type="hidden" name="app" value="{{ selected_app }}" />
+                    <button class="icon-btn secondary" type="submit" title="Rotate token" aria-label="Rotate token">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none">
+                        <path d="M20 12a8 8 0 1 1-2.34-5.66"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"/>
+                        <path d="M20 4v6h-6"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"/>
+                      </svg>
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              <div class="muted" style="margin-top:6px;">
+                Token is hidden. Use the rotate icon to generate a new one (this revokes the old one immediately).
+              </div>
+            {% endif %}
+          </div>
+        {% else %}
+          <div class="muted" style="margin-top:12px;">
+            Tip: click an application above to view/copy/rotate its token.
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content: space-between;">
+          <div class="muted">Session active</div>
+          <form method="post" action="/gateway/logout">
+            <button class="btn" type="submit">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function disableSubmit(formEl) {
+        try {
+          if (!formEl) return true;
+          const btn = formEl.querySelector('button[type="submit"]');
+          if (!btn) return true;
+          if (btn.disabled) return false;
+          btn.disabled = true;
+          if (btn.classList.contains("btn")) btn.textContent = "Working...";
+          return true;
+        } catch (e) {
+          return true;
+        }
+      }
+
+      function confirmDeleteApp(formEl) {
+        try {
+          const appInput = formEl.querySelector('input[name="app"]');
+          const app = (appInput && appInput.value) ? appInput.value : "";
+          const ok = window.confirm("Delete application '" + app + "'? This will revoke its active token.");
+          if (!ok) return false;
+          return disableSubmit(formEl);
+        } catch (e) {
+          return true;
+        }
+      }
+
+      function copyToken(btn) {
+        if (!btn) return;
+
+        const token = (btn.getAttribute("data-token") || "").trim();
+        if (!token) return;
+
+        if (btn._resetTimer) {
+          clearTimeout(btn._resetTimer);
+          btn._resetTimer = null;
+        }
+
+        const setCopiedState = () => {
+          btn.setAttribute("data-state", "copied");
+          btn.setAttribute("title", "Copied");
+
+          btn._resetTimer = setTimeout(() => {
+            btn.setAttribute("data-state", "idle");
+            btn.setAttribute("title", "Copy token");
+            btn._resetTimer = null;
+          }, 1500);
+        };
+
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(token).then(setCopiedState);
+            return;
+          }
+        } catch (e) {}
+
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = token;
+          ta.setAttribute("readonly", "");
+          ta.style.position = "absolute";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+          setCopiedState();
+        } catch (e) {}
+      }
+    </script>
+  </body>
+</html>

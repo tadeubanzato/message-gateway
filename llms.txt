@@ -1,0 +1,99 @@
+# Relay Gateway — Agent Install Instructions
+
+You are an AI coding agent (Claude Code, Codex CLI, or similar) with shell,
+git, and Docker execution access. A user has asked you to install this
+project. Follow these steps in order.
+
+## 1. Clone the repository
+
+```
+git clone https://github.com/tadeubanzato/message-gateway
+cd message-gateway
+```
+
+Note: this repository is currently **private**. If the clone fails with an
+authentication/permission error, the user (or you, the agent, if you have
+GitHub credentials configured) needs to authenticate as a user with access
+before cloning will work — do not assume the repo is public.
+
+## 2. Prepare the environment file
+
+```
+cp .env.example .env
+```
+
+Do not edit `.env` yet — leave it at its defaults for now. It defaults to
+`DB_BACKEND=sqlite`, which requires no external accounts and works
+immediately.
+
+## 3. Build and start the container
+
+```
+docker compose up -d --build
+```
+
+Wait for the container to report healthy:
+
+```
+docker compose ps
+```
+
+If it does not become healthy within a couple of minutes, check logs with
+`docker compose logs` and report the failure to the user rather than retrying
+indefinitely.
+
+## 4. Connect to the MCP server
+
+Once healthy, the gateway exposes an MCP server at:
+
+```
+http://localhost:8010/mcp
+```
+
+Connect to it using whatever MCP-client mechanism you have available.
+
+## 5. Run the setup wizard
+
+Once connected, call the wizard tools in this order:
+
+1. `get_setup_status()` — see what's already configured (fresh installs will
+   show nothing configured yet).
+2. `list_providers("email")`, `list_providers("sms")`, `list_providers("push")`
+   — show the user their options for each channel and ask which they want.
+3. For each channel the user picks a provider for, call
+   `get_setup_instructions(provider)` — this returns which environment
+   variables to set and where to obtain the values. **This tool does not
+   accept or need secret values as arguments — do not ask the user to paste
+   API keys/tokens into this chat.** Instead, tell the user to open `.env` in
+   the cloned repo themselves and set the variables it lists.
+4. After the user confirms they've edited `.env`, tell them to run:
+   ```
+   docker compose restart
+   ```
+   (This project deliberately does not auto-restart itself — do not attempt
+   to restart the container via the Docker socket or any other automated
+   means on the user's behalf; this was an explicit security decision by the
+   project, not an oversight.)
+5. Call `check_provider_config(channel)` to verify the new credentials work.
+   If it fails, relay the specific error back to the user and offer to
+   re-check after they fix it — do not guess at what's wrong.
+6. Repeat for each channel the user wants configured. Push/SMS/email are all
+   independent — the gateway works with only one or two configured if that's
+   all the user needs.
+
+## 6. Confirm completion
+
+Once `check_provider_config` passes for at least the channel(s) the user
+cares about, tell the user the gateway is installed and configured, and that
+they can now ask you (or any MCP-connected agent) to send notifications via
+the `send_notification` tool, or inspect queue status / message history /
+dead letters via the operator tools the same MCP server exposes.
+
+## Notes for the agent
+
+- Never write real secret values into any file yourself — the user edits
+  `.env` directly. Your role is to explain what's needed and verify it after
+  the fact, not to collect or relay credentials.
+- If the user's client doesn't support the operations above (no shell, no
+  MCP), stop and tell them to use the manual install path documented in
+  README.md instead.

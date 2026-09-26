@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Relay Gateway Portal - Login</title>
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; background: #fff; color: #111; margin: 0; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 24px; }
+      .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 16px 0; }
+      h1 { font-size: 22px; margin: 0 0 8px; }
+      .muted { color: #666; font-size: 12px; }
+      label { display:block; font-size: 12px; color:#666; margin: 12px 0 6px; }
+      input { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #ddd; font-size:14px; box-sizing:border-box; }
+      .btn { margin-top: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid #111; background: #111; color: #fff; cursor: pointer; font-size: 14px; }
+      .btn-secondary { background: #fff; color: #111; }
+      .err { background: #fff3f3; border: 1px solid #ffd0d0; padding: 10px; border-radius: 10px; color: #8a0000; margin-bottom: 10px; font-size: 13px; }
+      .row { display:flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      a { color: #111; }
+    </style>
+  </head>
+
+  <body>
+    <div class="wrap">
+      <h1>Relay Gateway Portal</h1>
+      <div class="muted">Login</div>
+
+      <div class="card">
+        {% if error %}
+          <div class="err">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="/gateway/login" autocomplete="off">
+          <label>Email</label>
+          <input name="email" value="{{ email or '' }}" placeholder="you@example.com" />
+
+          <label>Password</label>
+          <input type="password" name="password" placeholder="Your password" />
+
+          <div class="row">
+            <button class="btn" type="submit">Login</button>
+            <a href="/gateway/register" class="muted">Create an account</a>
+          </div>
+        </form>
+
+        {% if test_user_key_set %}
+          <hr style="margin:16px 0; border:none; border-top:1px solid #eee;" />
+          <div class="muted">Dev-only:</div>
+          <form method="post" action="/gateway/login/test">
+            <button class="btn btn-secondary" type="submit">Login as test user</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </body>
+</html>
