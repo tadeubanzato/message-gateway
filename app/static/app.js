@@ -15,7 +15,7 @@
   }
 
   // Send-a-test popup. providers: [{name,label}] of connected providers for the channel.
-  function openTest(channel, label, providers, defaultName, preset) {
+  function openTest(channel, label, providers, defaultName, preset, apps) {
     var dlg = document.getElementById("testDlg"); if (!dlg) return;
     var needsTo = channel !== "push";
     var multi = providers.length > 1;
@@ -24,6 +24,14 @@
     sel.innerHTML = providers.map(function (p) { return '<option value="' + p.name + '">' + p.label + (p.name === defaultName ? " (default)" : "") + "</option>"; }).join("");
     sel.value = preset || defaultName || (providers[0] && providers[0].name);
     dlg.querySelector("[data-provider-row]").classList.toggle("hidden", !multi);
+    // Pushover apps: let the tester pick which application sends the test.
+    var appSel = dlg.querySelector("[data-app]"), appRow = dlg.querySelector("[data-app-row]");
+    var usable = (apps || []).filter(function (a) { return a.set; });
+    appSel.innerHTML = usable.map(function (a) { return '<option value="' + a.name + '">' + a.name + (a.is_default ? " (default)" : "") + "</option>"; }).join("");
+    var def = usable.filter(function (a) { return a.is_default; })[0];
+    if (def) appSel.value = def.name;
+    function syncApp() { appRow.classList.toggle("hidden", !(channel === "push" && sel.value === "pushover" && usable.length > 1)); }
+    sel.onchange = syncApp; syncApp();
     var to = dlg.querySelector("[data-to]");
     dlg.querySelector("[data-to-row]").classList.toggle("hidden", !needsTo);
     to.placeholder = channel === "email" ? "you@example.com" : "+15551234567";
@@ -33,7 +41,7 @@
     var go = dlg.querySelector("[data-send]"); go.disabled = false; go.textContent = "Send test";
     go.onclick = function () {
       go.disabled = true; go.textContent = "Sending…";
-      post("/gateway/channels/" + channel + "/test", { provider: sel.value, to: needsTo ? to.value : null })
+      post("/gateway/channels/" + channel + "/test", { provider: sel.value, to: needsTo ? to.value : null, app: (channel === "push" && sel.value === "pushover" && usable.length > 1) ? appSel.value : null })
         .then(function (r) { say(out, r.ok ? "Sent. Check your device or inbox." : (r.error || "Send failed."), r.ok ? "ok" : "err"); })
         .catch(function (e) { say(out, e.message, "err"); })
         .then(function () { go.disabled = false; go.textContent = "Send test"; });

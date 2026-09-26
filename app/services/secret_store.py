@@ -103,3 +103,16 @@ def stored_setting_names() -> list[str]:
         return sorted(_load().keys())
     except Exception:
         return []
+
+
+def unreadable_count() -> int:
+    """Stored settings that can't be decrypted with the current key. Non-zero means
+    the encryption key changed (for example the data volume was replaced while the
+    database was kept), so those credentials must be entered again."""
+    try:
+        from app.db import get_repository
+
+        rows = get_repository().list_settings()
+        return sum(1 for doc in rows.values() if decrypt(doc.get("value_enc", "")) is None)
+    except Exception:
+        return 0

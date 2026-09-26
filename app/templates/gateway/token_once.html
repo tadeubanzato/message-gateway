@@ -17,6 +17,11 @@
   -H "Content-Type: application/json" \
   -d '{"channel":"push","app":"default","body":"Hello!"}'</code></pre>
 
+  <h3 style="margin-top:20px">Connect an AI agent (optional)</h3>
+  <p class="muted" style="margin:0 0 6px">Run this in your own terminal (it contains the token), then restart Claude Code or run <code>/mcp</code>:</p>
+  <pre style="white-space:pre-wrap;word-break:break-all"><code id="mcpcmd">claude mcp add --transport http message-gateway {{ base_url }}/mcp --header "X-User-Key: {{ user_key }}" --header "X-API-Token: {{ raw_token }}"</code></pre>
+  <button class="btn ghost sm" onclick="copyText(document.getElementById('mcpcmd').textContent, this)">Copy command</button>
+
   <div class="row" style="margin-top:14px">
     <a class="btn" href="/gateway">I've saved it, continue</a>
     <a class="btn ghost" href="/gateway/keys">Back to API keys</a>

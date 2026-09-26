@@ -45,6 +45,7 @@
 <dialog id="testDlg">
   <h3 data-title>Send a test</h3>
   <div data-provider-row><label>Provider</label><select data-provider></select></div>
+  <div data-app-row class="hidden"><label>Application</label><select data-app></select></div>
   <div data-to-row><label>Send to</label><input data-to autocomplete="off" /></div>
   <p class="muted" data-hint></p>
   <div data-out></div>
@@ -53,6 +54,11 @@
     <button class="btn" type="button" data-send>Send test</button>
   </div>
 </dialog>
+{% endif %}
+{% if not bare and warn_not_persistent %}
+<div class="msg" style="margin:0;border-radius:0;background:var(--errbg);color:var(--err);text-align:center">
+  <b>Your data is not on a persistent volume.</b> Accounts, settings and messages will be lost when this container is removed. Start the gateway with <code>./install.sh</code>.
+</div>
 {% endif %}
 {% block body %}<main class="wrap">{% block content %}{% endblock %}</main>{% endblock %}
 <script>

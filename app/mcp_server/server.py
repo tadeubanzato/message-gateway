@@ -1,251 +1,438 @@
 """
-MCP server — one merged server exposing three tool categories:
-  1. Agent-facing send tool
-  2. Setup wizard tools (install-time, config-driven, never accepts secrets as arguments)
-  3. Operator/debug tools (queue status, message/attempt history, dead letters, retry)
+MCP server: lets an AI agent send messages and inspect the gateway.
 
-Runs as its own process using FastMCP's streamable-http transport, reachable
-at PUBLIC_MCP_URL (default http://localhost:8010/mcp) per the handoff spec.
+Authentication: every request must carry the same X-User-Key and X-API-Token
+headers as the HTTP API (see McpAuthMiddleware in auth.py). Tools then run as
+that account:
+  - send / read tools act on the caller's own messages only
+  - queue, dead-letter and provider-check tools are administrator-only
 
-Config-reload note: check_provider_config assumes the user has already run
-`docker compose restart` after editing .env (per the resolved, deliberately
-NOT-Docker-socket-based design) — this server does not and must not attempt
-to restart the stack itself.
+Secrets never pass through this server. Provider credentials are entered in the
+web app (Channels pages), not through MCP tools.
+
+The MCP routes are served by the main FastAPI app (same port, path /mcp); see
+app/main.py.
 """
 
 from __future__ import annotations
 
+import asyncio
+import functools
+import inspect
 import json
 import os
-from typing import Any, Optional
+import re
+import time
+from typing import Any, Optional, Union
 
 import pika
-from mcp.server.fastmcp import FastMCP
+from fastapi import HTTPException
+from mcp.server.fastmcp import Context, FastMCP
 
+from app.auth import authenticate
 from app.broker import (
     QUEUE_NAMES,
     RABBITMQ_URL,
     dead_letter_queue_name,
     republish_from_dead_letter,
 )
-from app.services import message_log
 from app.db import backend_name, get_repository
-from app.schemas import MessageEnqueued, MessageRequest
-from app.services.email import get_email_provider
-from app.services.email import list_providers as list_email_providers
-from app.services.push import get_push_provider
-from app.services.push import list_providers as list_push_providers
-from app.services.sms import get_sms_provider
-from app.services.sms import list_providers as list_sms_providers
+from app.schemas import MessageRequest
+from app.services import access, channels, message_log, secret_store
+from app.services.phone import normalize_phone
 
-mcp = FastMCP(name="relay-gateway", streamable_http_path="/mcp")
+GATEWAY_BASE_URL = (os.environ.get("GATEWAY_BASE_URL") or "http://localhost:8010").strip().rstrip("/")
 
-GATEWAY_BASE_URL = os.environ.get("GATEWAY_BASE_URL", "http://localhost:8000").strip() or "http://localhost:8000"
+MAX_LIST = 100
+MAX_CONTENT_CHARS = 2000
 
-_SETUP_INSTRUCTIONS: dict[str, dict[str, Any]] = {
-    "mailjet": {
-        "env_vars": ["MAILJET_API_KEY", "MAILJET_SECRET_KEY", "MAILJET_FROM_EMAIL"],
-        "instructions": (
-            "Sign in at app.mailjet.com -> Account Settings -> REST API -> API Key "
-            "Management. Copy the API Key and Secret Key, and set a verified sender "
-            "address as MAILJET_FROM_EMAIL. Set MAILJET_API_KEY, MAILJET_SECRET_KEY, "
-            "and MAILJET_FROM_EMAIL in your .env file."
-        ),
-    },
-    "sendgrid": {
-        "env_vars": ["SENDGRID_API_KEY", "SENDGRID_FROM_EMAIL"],
-        "instructions": (
-            "Sign in at app.sendgrid.com -> Settings -> API Keys -> Create API Key "
-            "(Full Access or Mail Send). Verify a sender identity for SENDGRID_FROM_EMAIL. "
-            "Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL in your .env file."
-        ),
-    },
-    "twilio": {
-        "env_vars": ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER"],
-        "instructions": (
-            "Sign in at console.twilio.com -> copy your Account SID and Auth Token "
-            "from the dashboard. Buy or use an existing Twilio phone number for "
-            "TWILIO_FROM_NUMBER. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and "
-            "TWILIO_FROM_NUMBER in your .env file."
-        ),
-    },
-    "infobip": {
-        "env_vars": ["INFOBIP_API_KEY", "INFOBIP_BASE_URL", "INFOBIP_FROM"],
-        "instructions": (
-            "Sign in at portal.infobip.com -> API Keys -> create a key. Your "
-            "personalized base URL is shown on the API Keys page. Set INFOBIP_API_KEY, "
-            "INFOBIP_BASE_URL, and INFOBIP_FROM (your registered sender) in your .env file."
-        ),
-    },
-    "local_modem": {
-        "env_vars": ["SMS_API_BASE_URL", "SMS_API_TOKEN"],
-        "instructions": (
-            "This provider expects a self-hosted HTTP API in front of ModemManager/mmcli "
-            "on your own network (e.g. a Raspberry Pi with a USB modem). Set "
-            "SMS_API_BASE_URL to that service's address (e.g. http://<device-ip>:8666) "
-            "and SMS_API_TOKEN to its bearer token in your .env file."
-        ),
-    },
-    "pushover": {
-        "env_vars": ["PUSHOVER_USER_KEY", "PUSHOVER_APPS", "PUSHOVER_APPTOKEN_DEFAULT"],
-        "instructions": (
-            "Sign in at pushover.net -> copy your User Key. Create an Application at "
-            "pushover.net/apps/build to get an API token. Set PUSHOVER_USER_KEY and "
-            "PUSHOVER_APPTOKEN_DEFAULT in your .env file. If you want multiple named "
-            "apps, set PUSHOVER_APPS=\"name:ENV_VAR,name2:ENV_VAR2\" mapping app names "
-            "to your own env var names, and define each of those env vars with its "
-            "own Pushover application token."
-        ),
-    },
-    "ntfy": {
-        "env_vars": ["NTFY_TOPIC", "NTFY_SERVER_URL"],
-        "instructions": (
-            "ntfy is free and open source. Pick a hard-to-guess topic name (e.g. "
-            "relay-gateway-yourname) and set NTFY_TOPIC to it. Leave NTFY_SERVER_URL "
-            "unset to use the public ntfy.sh instance, or point it at your own "
-            "self-hosted ntfy server. Subscribe to the topic in the ntfy app to "
-            "receive notifications."
-        ),
-    },
-}
-
-_PROVIDER_GETTERS = {
-    "email": get_email_provider,
-    "sms": get_sms_provider,
-    "push": get_push_provider,
-}
-
-_PROVIDER_LISTERS = {
-    "email": list_email_providers,
-    "sms": list_sms_providers,
-    "push": list_push_providers,
-}
+mcp = FastMCP(
+    name="message-gateway",
+    streamable_http_path="/mcp",
+    instructions=(
+        "Message Gateway sends email, SMS and push notifications through the providers its "
+        "administrator connected. Map requests to tools like this: 'send a push notification' -> "
+        "send_push; 'send an email' -> send_email; 'send / text an SMS to <number>' -> send_sms; "
+        "'send a test email/sms/push' -> send_test; anything else -> send_notification. Each send "
+        "waits a few seconds and reports delivered or failed, so you can tell the user the outcome. "
+        "Use list_providers to see what is connected (and pass provider= to choose one). If a "
+        "channel isn't set up, tell the user the administrator must connect it in the web app. "
+        "Provider credentials are managed in the web app, never through this server: never ask "
+        "the user to paste keys or passwords into chat."
+    ),
+)
 
 
 # ---------------------------------------------------------------------
-# 1. Agent-facing: send
+# Auth helpers
 # ---------------------------------------------------------------------
-@mcp.tool()
-def send_notification(
+class _Denied(Exception):
+    pass
+
+
+def _who(ctx: Optional[Context]) -> dict[str, Any]:
+    """Identity of the caller, from the request headers. Raises _Denied."""
+    request = getattr(getattr(ctx, "request_context", None), "request", None) if ctx else None
+    if request is None:
+        raise _Denied("Unauthorized: could not read the request credentials.")
+    ident = authenticate(request.headers.get("x-user-key"), request.headers.get("x-api-token"))
+    if ident is None:
+        raise _Denied("Unauthorized: invalid or missing X-User-Key / X-API-Token.")
+    return ident
+
+
+def _admin(ctx: Optional[Context]) -> dict[str, Any]:
+    ident = _who(ctx)
+    if ident["account_id"] != access.owner_id():
+        raise _Denied("This tool is for the administrator only. Ask them to run it or to grant you a key.")
+    return ident
+
+
+def tool():
+    """Register an MCP tool (sync or async) that turns failures into a clean error result."""
+    def deco(fn):
+        if inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def awrapper(*args, **kwargs):
+                try:
+                    return await fn(*args, **kwargs)
+                except _Denied as e:
+                    return {"ok": False, "error": str(e)}
+                except Exception as e:  # noqa: BLE001 - never leak internals to the agent
+                    return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+            return mcp.tool()(awrapper)
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except _Denied as e:
+                return {"ok": False, "error": str(e)}
+            except Exception as e:  # noqa: BLE001
+                return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+        return mcp.tool()(wrapper)
+    return deco
+
+
+def _cap(text: Optional[str]) -> Optional[str]:
+    if text is None or len(text) <= MAX_CONTENT_CHARS:
+        return text
+    return text[:MAX_CONTENT_CHARS] + "… (truncated)"
+
+
+def _view(doc: dict[str, Any], include_content: bool) -> dict[str, Any]:
+    out = message_log.public_view(doc, include_content=include_content)
+    if include_content:
+        out["body"] = _cap(out.get("body"))
+    return out
+
+
+def _channel(channel: str) -> str:
+    c = (channel or "").strip().lower()
+    if c not in channels.CATALOG:
+        raise _Denied(f"Unknown channel {channel!r}. Use email, sms or push.")
+    return c
+
+
+# ---------------------------------------------------------------------
+# Send
+# ---------------------------------------------------------------------
+@tool()
+async def send_notification(
+    ctx: Context,
     channel: str,
-    to: Optional[str] = None,
+    to: Union[str, list[str], None] = None,
     subject: Optional[str] = None,
     body: Optional[str] = None,
     template: Optional[str] = None,
     context: Optional[dict] = None,
     provider: Optional[str] = None,
+    app: Optional[str] = None,
+    email_type: Optional[str] = None,
+    wait_seconds: int = 8,
 ) -> dict:
-    """Send a notification (email, sms, or push) through the gateway.
+    """Send a message on any channel (general form). Prefer send_push, send_email,
+    send_sms or send_test when they fit. The message is queued, then this waits a few
+    seconds and reports 'delivered' or 'failed' with the reason.
 
-    channel: 'email', 'sms', or 'push'.
-    to: recipient (email address, phone number, or omit for push to use the
-        default configured recipient).
-    subject: required for email; used as the push title if provided.
-    body: message content. Required unless `template` is given.
-    template: name of a server-side template to render instead of `body`.
-    context: dict of values to substitute into {{context.key}} placeholders
-        in the body/template.
-    provider: which connected provider to use (default: the channel's default).
+    channel: 'email', 'sms' or 'push'.
+    to: recipient (email address or phone number, or a list). Omit for push.
+    subject: required for email; the title for push.
+    body: message text. Required unless `template` is given.
+    template: name of a server-side template to use instead of `body`.
+    context: values for {{context.key}} placeholders in the body/template.
+    provider: which connected provider to use (see list_providers).
+    app: push only. Which named Pushover app to send from.
+    email_type: 'txt' (default) or 'html'.
+    wait_seconds: how long to wait for the delivery result (0 = don't wait).
     """
-    req = MessageRequest(
-        channel=channel, to=to, subject=subject, body=body,
-        template=template, context=context or {}, provider=provider,
-    )
-    from app.main import _load_template_text, _render_context  # local import avoids circularity
+    ch = _channel(channel)
+    recips = _recipients(to)
+    if ch == "sms" and recips:
+        recips = [_phone(n) for n in (recips if isinstance(recips, list) else [recips])]
+        recips = recips[0] if len(recips) == 1 else recips
+    return await _send(ctx, wait_seconds, channel=ch, to=recips, subject=subject, body=body, template=template,
+                 context=context or {}, provider=provider, app=app, emailType=email_type)
 
-    used_template = (req.template or "").strip() or None
-    base_text = _load_template_text(used_template, req=req) if used_template else (req.body or "")
-    final_body = _render_context(base_text, req.context)
 
-    recipients = req.to_list_deduped() or ([""] if channel == "push" else [])
-    if not recipients:
-        return {"ok": False, "error": "Missing 'to' recipient(s)"}
+def _phone(number: str) -> str:
+    """Normalize a phone number typed any way; the country code is required."""
+    try:
+        return normalize_phone(number)
+    except ValueError as e:
+        raise _Denied(f"{e} Ask the user for the full number including the country code.")
+
+
+def _recipients(to: Union[str, list[str], None]) -> Optional[Union[str, list[str]]]:
+    """Accept one address/number, a list, or a comma-separated string."""
+    if to is None:
+        return None
+    parts = to if isinstance(to, list) else str(to).split(",")
+    cleaned = [p.strip() for p in parts if p and p.strip()]
+    if not cleaned:
+        return None
+    return cleaned[0] if len(cleaned) == 1 else cleaned
+
+
+async def _send(ctx: Context, wait_seconds: int, **fields: Any) -> dict:
+    """Queue a message for the caller's account, then wait briefly for the result."""
+    ident = _who(ctx)
+    from app.main import enqueue_message  # local import: main imports this module
+
+    channel = fields.get("channel")
+    try:
+        req = MessageRequest(**{k: v for k, v in fields.items() if v is not None})
+        resp = await asyncio.to_thread(enqueue_message, req, ident["account_id"])
+    except HTTPException as e:
+        detail = e.detail
+        extra = {k: detail[k] for k in ("available", "default", "available_apps") if isinstance(detail, dict) and k in detail}
+        out = {"ok": False, "error": detail.get("error") if isinstance(detail, dict) else str(detail), **extra}
+        if e.status_code == 409 and channel in channels.CATALOG:
+            out["setup_page"] = f"{GATEWAY_BASE_URL}/gateway/channels/{channel}"
+            out["hint"] = f"The administrator can connect a {channel} provider at the setup_page URL."
+        return out
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+
+    ids = [resp.message_id] if getattr(resp, "message_id", None) else list(getattr(resp, "message_ids", None) or [])
+    result: dict[str, Any] = {"ok": True, "message_ids": ids, "status": "queued"}
+    if not ids or wait_seconds <= 0:
+        return result
 
     repo = get_repository()
-    message_ids = []
-    for recipient in recipients:
-        msg = MessageEnqueued.from_request(req.model_copy(update={"to": recipient, "body": final_body}))
-        message_log.record_queued(msg, template=used_template)
-        from app.broker import publish_message
+    deadline = time.monotonic() + min(int(wait_seconds), 30)
+    docs: list[dict[str, Any]] = []
+    while True:
+        docs = await asyncio.to_thread(lambda: [d for d in (repo.get_message(i) for i in ids) if d])
+        if len(docs) == len(ids) and all(d.get("status") != "queued" for d in docs):
+            break
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(0.5)
 
-        publish_message(msg)
-        message_ids.append(msg.message_id)
-
-    return {"ok": True, "message_ids": message_ids}
-
-
-# ---------------------------------------------------------------------
-# 2. Setup wizard
-# ---------------------------------------------------------------------
-@mcp.tool()
-def list_providers(channel: str) -> dict:
-    """List available provider options for a channel ('email', 'sms', or 'push')."""
-    lister = _PROVIDER_LISTERS.get(channel)
-    if not lister:
-        return {"ok": False, "error": f"Unknown channel {channel!r}. Use email, sms, or push."}
-    return {"ok": True, "channel": channel, "providers": lister()}
+    statuses = [d.get("status") for d in docs]
+    if statuses and all(s == "delivered" for s in statuses):
+        result.update(status="delivered", provider=docs[0].get("provider"))
+    elif any(s == "failed" for s in statuses):
+        failed = next(d for d in docs if d.get("status") == "failed")
+        result.update(ok=False, status="failed", provider=failed.get("provider"),
+                      error=failed.get("last_error") or "Delivery failed.",
+                      hint="Use get_message for the full delivery attempts.")
+    else:
+        result.update(note="Still being delivered. Use get_message to check the result shortly.")
+    return result
 
 
-@mcp.tool()
-def get_setup_instructions(provider: str) -> dict:
-    """Get the env vars a provider needs and where to obtain their values.
+@tool()
+async def send_push(
+    ctx: Context,
+    body: str,
+    title: Optional[str] = None,
+    app: Optional[str] = None,
+    provider: Optional[str] = None,
+    url: Optional[str] = None,
+    wait_seconds: int = 8,
+) -> dict:
+    """Send a PUSH NOTIFICATION to the user's phone/device. Use this when the user says
+    "send a push notification", "notify me", "ping my phone" and the like.
 
-    Does NOT accept or return a place to paste secret values — this tool
-    only tells you which .env keys to set and where to get them. Edit your
-    .env file directly, then run check_provider_config to verify.
+    body: the notification text.
+    title: optional headline.
+    app: which named Pushover app to send from (see list_providers -> pushover_apps).
+        Default: the gateway's default app.
+    provider: which connected push provider to use (default: the channel default).
+    url: optional link to attach.
+    wait_seconds: how long to wait for the delivery result (0 = don't wait).
     """
-    info = _SETUP_INSTRUCTIONS.get(provider)
-    if not info:
-        return {"ok": False, "error": f"Unknown provider {provider!r}."}
-    return {"ok": True, "provider": provider, **info}
+    return await _send(ctx, wait_seconds, channel="push", body=body, subject=title, app=app,
+                 provider=provider, url=url)
 
 
-@mcp.tool()
-def check_provider_config(channel: str, provider: Optional[str] = None) -> dict:
-    """Verify the currently-configured provider for a channel has valid
-    credentials, by making a lightweight authenticated call to its API.
+@tool()
+async def send_email(
+    ctx: Context,
+    to: Union[str, list[str]],
+    subject: str,
+    body: str,
+    html: bool = False,
+    provider: Optional[str] = None,
+    wait_seconds: int = 8,
+) -> dict:
+    """Send an EMAIL. Use this when the user says "send an email to ...".
 
-    If you just edited .env, restart the gateway first
-    (`docker compose restart`) so the new values are loaded, then call this.
+    to: recipient address, or a list of addresses.
+    subject: subject line. body: the message (plain text, or HTML if html=true).
+    provider: which connected email provider to use (default: the channel default).
+    wait_seconds: how long to wait for the delivery result (0 = don't wait).
     """
-    getter = _PROVIDER_GETTERS.get(channel)
-    if not getter:
-        return {"ok": False, "error": f"Unknown channel {channel!r}. Use email, sms, or push."}
-    try:
-        provider_obj = getter(provider)
-    except SystemExit as e:
-        return {"ok": False, "error": str(e)}
-    result = provider_obj.check_config()
-    return {"ok": result.ok, "provider": result.provider, "error": result.error, "status_code": result.status_code}
+    return await _send(ctx, wait_seconds, channel="email", to=_recipients(to), subject=subject, body=body,
+                 emailType="html" if html else "txt", provider=provider)
 
 
-@mcp.tool()
-def get_setup_status() -> dict:
-    """Overall setup progress: which provider is active per channel, and
-    whether its credentials currently check out."""
-    status = {"db_backend": backend_name(), "db_ok": get_repository().ping()}
-    for chan, getter in _PROVIDER_GETTERS.items():
-        try:
-            provider = getter()
-            result = provider.check_config()
-            status[chan] = {"provider": provider.name, "configured": result.ok, "error": result.error}
-        except SystemExit as e:
-            status[chan] = {"provider": None, "configured": False, "error": str(e)}
-    return status
+@tool()
+async def send_sms(
+    ctx: Context,
+    body: str,
+    to: Union[str, list[str], None] = None,
+    provider: Optional[str] = None,
+    wait_seconds: int = 8,
+) -> dict:
+    """Send an SMS text message. Use this when the user says "send an SMS to +1 555...",
+    "text this number" and the like.
+
+    body: the message text.
+    to: phone number including the country code, in any format ("+1 (555) 123-4567"
+        works). Leave it out to use the gateway's default phone number, if one is set.
+        If the user gave a number without a country code, ask for it.
+    provider: which connected SMS provider to use (default: the channel default).
+    wait_seconds: how long to wait for the delivery result (0 = don't wait).
+    """
+    recips = _recipients(to)
+    if recips is None:
+        if not channels.default_sms_number():
+            return {"ok": False, "error": "Say which phone number to text (with country code), or ask the administrator to set a default phone number in the web app (Channels > SMS)."}
+        return await _send(ctx, wait_seconds, channel="sms", body=body, provider=provider)  # API fills in the default
+    numbers = [_phone(n) for n in (recips if isinstance(recips, list) else [recips])]
+    return await _send(ctx, wait_seconds, channel="sms", to=numbers[0] if len(numbers) == 1 else numbers,
+                       body=body, provider=provider)
+
+
+@tool()
+async def send_test(
+    ctx: Context,
+    channel: str = "push",
+    to: Optional[str] = None,
+    provider: Optional[str] = None,
+    app: Optional[str] = None,
+    wait_seconds: int = 10,
+) -> dict:
+    """Send a short TEST message to check a channel works. Use this when the user says
+    "send a test email", "test push", "send me a test SMS" and the like.
+
+    channel: 'push' (default), 'email' or 'sms'.
+    to: for email, defaults to the user's own account email; for sms, defaults to the
+        gateway's default phone number (or give one with country code); ignored for push.
+    provider / app: optionally test a specific provider or Pushover app.
+    """
+    ident = _who(ctx)
+    ch = _channel(channel)
+    text = "Test message from Message Gateway, sent by your AI agent. If you can read this, it works."
+    if ch == "push":
+        return await _send(ctx, wait_seconds, channel="push", body=text, subject="Message Gateway test",
+                     app=app, provider=provider)
+    if ch == "email":
+        target = (to or "").strip()
+        if not target:
+            acct = get_repository().find_account_by_id(ident["account_id"]) or {}
+            target = acct.get("email", "")
+        if not target:
+            return {"ok": False, "error": "Say which email address to send the test to."}
+        return await _send(ctx, wait_seconds, channel="email", to=_recipients(target), subject="Message Gateway test",
+                     body=text, emailType="txt", provider=provider)
+    if not (to or "").strip():
+        if not channels.default_sms_number():
+            return {"ok": False, "error": "Say which phone number to send the test to (with country code), or ask the administrator to set a default phone number."}
+        return await _send(ctx, wait_seconds, channel="sms", body=text, provider=provider)  # default number
+    return await _send(ctx, wait_seconds, channel="sms", to=_phone(to), body=text, provider=provider)
 
 
 # ---------------------------------------------------------------------
-# 3. Operator-facing: read/inspect + act
+# Discover
 # ---------------------------------------------------------------------
-@mcp.tool()
-def get_health() -> dict:
-    """Overall gateway health: API, database, and RabbitMQ reachability."""
-    db_ok = False
+@tool()
+def list_providers(ctx: Context, channel: Optional[str] = None) -> dict:
+    """Which providers you can send with. For each channel: the default provider, the
+    connected providers you can pass as `provider` to send_notification, and every
+    provider the gateway supports."""
+    _who(ctx)
+    chans = [_channel(channel)] if channel else list(channels.CATALOG)
+    out = {
+        ch: {
+            "default": channels.default_provider(ch),
+            "connected": channels.connected_providers(ch),
+            "supported": list(channels.CATALOG[ch]["providers"]),
+        }
+        for ch in chans
+    }
+    if "push" in out:
+        out["push"]["pushover_apps"] = [a["name"] for a in channels.pushover_apps() if a["set"]]
+    return {"ok": True, "channels": out}
+
+
+@tool()
+def get_setup_status(ctx: Context) -> dict:
+    """Overall state of the gateway: database, and per channel whether it is ready
+    (default provider connected), needs attention, or is not set up. Offline check:
+    it does not call the providers (administrators can use check_provider_config)."""
+    _who(ctx)
     try:
         db_ok = get_repository().ping()
     except Exception:
         db_ok = False
+    return {
+        "ok": True, "db_backend": backend_name(), "db_ok": db_ok, "web_app": f"{GATEWAY_BASE_URL}/gateway",
+        "credentials_unreadable": secret_store.unreadable_count(),
+        "channels": {
+            s["channel"]: {
+                "state": s["state"], "default": s["default"],
+                "connected": [c["name"] for c in s["connected"]],
+                "setup_page": f"{GATEWAY_BASE_URL}/gateway/channels/{s['channel']}",
+                **({"default_phone_number_set": bool(channels.default_sms_number())} if s["channel"] == "sms" else {}),
+            }
+            for s in channels.all_status()
+        },
+    }
 
+
+@tool()
+def get_setup_instructions(ctx: Context, provider: str) -> dict:
+    """What a provider needs and where to find it. The administrator enters these
+    values in the web app (Channels pages). Never ask the user to paste secrets in chat."""
+    _who(ctx)
+    name = (provider or "").strip().lower()
+    for ch, spec in channels.CATALOG.items():
+        info = spec["providers"].get(name)
+        if info:
+            return {
+                "ok": True, "provider": name, "channel": ch, "label": info["label"],
+                "where_to_find_it": info["help"],
+                "open_in_browser": [{"label": l["label"], "url": l["url"]} for l in info.get("links", [])],
+                "fields": [{"label": f["label"], "secret": bool(f.get("secret")), "optional": bool(f.get("optional"))}
+                           for f in info["fields"]],
+                "enter_them_here": f"{GATEWAY_BASE_URL}/gateway/channels/{ch}",
+                "note": "Only the gateway administrator can connect providers, in the browser.",
+            }
+    return {"ok": False, "error": f"Unknown provider {provider!r}."}
+
+
+@tool()
+def get_health(ctx: Context) -> dict:
+    """Gateway health: database and message queue reachability."""
+    _who(ctx)
+    try:
+        db_ok = get_repository().ping()
+    except Exception:
+        db_ok = False
     rabbit_ok = False
     try:
         conn = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
@@ -253,8 +440,80 @@ def get_health() -> dict:
         conn.close()
     except Exception:
         rabbit_ok = False
+    return {"ok": db_ok and rabbit_ok, "db_backend": backend_name(), "db_ok": db_ok, "rabbitmq_ok": rabbit_ok}
 
-    return {"ok": True, "db_backend": backend_name(), "db_ok": db_ok, "rabbitmq_ok": rabbit_ok}
+
+# ---------------------------------------------------------------------
+# Your messages
+# ---------------------------------------------------------------------
+@tool()
+def list_recent_messages(
+    ctx: Context,
+    channel: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 20,
+    search: Optional[str] = None,
+    include_content: bool = False,
+) -> dict:
+    """Your recent messages, newest first (only messages sent with your key's account).
+
+    channel: 'email', 'sms' or 'push'. status: 'queued', 'delivered' or 'failed'.
+    search: match recipient, subject, text or message id.
+    include_content: also return subject and body (off by default to keep results small).
+    """
+    ident = _who(ctx)
+    limit = max(1, min(int(limit), MAX_LIST))
+    docs = get_repository().list_messages(
+        channel.strip().lower() if channel else None, status.strip().lower() if status else None,
+        1000 if search else limit, account_id=ident["account_id"],
+    )
+    msgs = [_view(d, include_content or bool(search)) for d in docs]
+    if search:
+        needle = search.strip().lower()
+        msgs = [m for m in msgs if any(needle in str(m.get(k) or "").lower() for k in ("to", "subject", "body", "message_id"))]
+        if not include_content:
+            for m in msgs:
+                m.pop("body", None), m.pop("subject", None)
+    return {"ok": True, "count": len(msgs[:limit]), "messages": msgs[:limit]}
+
+
+@tool()
+def get_message(ctx: Context, message_id: str, include_content: bool = True) -> dict:
+    """One of your messages with its delivery attempts (provider, result, errors)."""
+    ident = _who(ctx)
+    repo = get_repository()
+    doc = repo.get_message(message_id)
+    if not doc or doc.get("account_id") != ident["account_id"]:
+        return {"ok": False, "error": "Message not found."}
+    attempts = [
+        {k: v for k, v in a.items() if k not in ("_id", "created_at")}
+        for a in sorted(repo.list_attempts(message_id), key=lambda a: a.get("attempt_number") or 0)
+    ]
+    return {"ok": True, "message": _view(doc, include_content), "delivery_attempts": attempts}
+
+
+@tool()
+def list_delivery_attempts(ctx: Context, message_id: str) -> dict:
+    """Delivery attempts for one of your messages (same data as get_message)."""
+    ident = _who(ctx)
+    repo = get_repository()
+    doc = repo.get_message(message_id)
+    if not doc or doc.get("account_id") != ident["account_id"]:
+        return {"ok": False, "error": "Message not found."}
+    attempts = [{k: v for k, v in a.items() if k not in ("_id", "created_at")} for a in repo.list_attempts(message_id)]
+    return {"ok": True, "attempts": attempts}
+
+
+# ---------------------------------------------------------------------
+# Administrator tools
+# ---------------------------------------------------------------------
+@tool()
+def check_provider_config(ctx: Context, channel: str, provider: Optional[str] = None) -> dict:
+    """ADMIN ONLY. Verify a provider's saved credentials by making a lightweight
+    authenticated call to its API. `provider` defaults to the channel's default."""
+    _admin(ctx)
+    channel = _channel(channel)
+    return {**channels.safe_check(channel, (provider or "").strip().lower() or None)}
 
 
 def _rabbitmq_management_queue_info(queue_name: str) -> dict:
@@ -284,78 +543,61 @@ def _rabbitmq_management_queue_info(queue_name: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-@mcp.tool()
-def get_queue_status() -> dict:
-    """Queue depth and consumer count for each channel's queue and dead-letter queue."""
+@tool()
+def get_queue_status(ctx: Context) -> dict:
+    """ADMIN ONLY. Depth and consumer count of every delivery queue and dead-letter queue."""
+    _admin(ctx)
     result: dict[str, Any] = {}
-    for chan, queue_name in QUEUE_NAMES.items():
-        for label, qn in [(chan, queue_name), (f"{chan}_dlq", dead_letter_queue_name(chan))]:
+    for chan, qname in QUEUE_NAMES.items():
+        for label, name in ((chan, qname), (f"{chan}_dlq", dead_letter_queue_name(chan))):
             try:
-                info = _rabbitmq_management_queue_info(qn)
+                info = _rabbitmq_management_queue_info(name)
                 result[label] = {"messages": info.get("messages"), "consumers": info.get("consumers")}
-            except Exception as e:
-                result[label] = {"error": str(e)}
+            except Exception as e:  # noqa: BLE001
+                result[label] = {"error": type(e).__name__}
     return {"ok": True, "queues": result}
 
 
-@mcp.tool()
-def list_recent_messages(channel: Optional[str] = None, status: Optional[str] = None, limit: int = 20) -> dict:
-    """List recently-enqueued messages, optionally filtered by channel and/or status
-    ('queued', 'delivered', 'failed')."""
-    try:
-        # Metadata only: this MCP endpoint is unauthenticated, so message
-        # content is only available through the authenticated API/portal.
-        msgs = get_repository().list_messages(channel, status, limit)
-        return {"ok": True, "messages": [message_log.public_view(m, include_content=False) for m in msgs]}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-@mcp.tool()
-def list_delivery_attempts(message_id: str) -> dict:
-    """List delivery attempts recorded for a given message_id."""
-    try:
-        attempts = get_repository().list_attempts(message_id)
-        return {"ok": True, "attempts": attempts}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-@mcp.tool()
-def list_dead_letters(channel: Optional[str] = None, limit: int = 20) -> dict:
-    """Peek at dead-lettered (permanently failed) messages without consuming them."""
-    channels = [channel] if channel else list(QUEUE_NAMES.keys())
+@tool()
+def list_dead_letters(ctx: Context, channel: Optional[str] = None, limit: int = 20, include_content: bool = False) -> dict:
+    """ADMIN ONLY. Peek at permanently failed messages without removing them. Message
+    text is hidden unless include_content is true."""
+    _admin(ctx)
+    chans = [_channel(channel)] if channel else list(QUEUE_NAMES.keys())
+    limit = max(1, min(int(limit), 50))
     results: dict[str, list] = {}
     conn = None
     try:
         conn = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
         ch = conn.channel()
-        for chan in channels:
-            dlq_name = dead_letter_queue_name(chan)
+        for chan in chans:
             peeked = []
             for _ in range(limit):
-                method, properties, body = ch.basic_get(queue=dlq_name, auto_ack=False)
+                method, _props, raw = ch.basic_get(queue=dead_letter_queue_name(chan), auto_ack=False)
                 if method is None:
                     break
                 try:
-                    peeked.append(json.loads(body.decode("utf-8", errors="replace")))
+                    m = json.loads(raw.decode("utf-8", errors="replace"))
+                    item = {k: m.get(k) for k in ("message_id", "channel", "to", "provider", "created_at", "app")}
+                    if include_content:
+                        item["subject"], item["body"] = m.get("subject"), _cap(m.get("body"))
                 except Exception:
-                    peeked.append({"raw": body.decode("utf-8", errors="replace")})
-                # Requeue immediately — this is a peek, not a consume.
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                    item = {"error": "unreadable message"}
+                peeked.append(item)
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)  # a peek, not a consume
             results[chan] = peeked
         return {"ok": True, "dead_letters": results}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
     finally:
         if conn is not None:
             conn.close()
 
 
-@mcp.tool()
-def retry_dead_letter(channel: str, message_id: str) -> dict:
-    """Find a dead-lettered message by message_id on the given channel's DLQ
-    and republish it to the real queue for redelivery. Removes it from the DLQ."""
+@tool()
+def retry_dead_letter(ctx: Context, channel: str, message_id: str) -> dict:
+    """ADMIN ONLY. Put a permanently failed message back on its queue for another
+    delivery attempt."""
+    _admin(ctx)
+    channel = _channel(channel)
     dlq_name = dead_letter_queue_name(channel)
     conn = None
     try:
@@ -363,42 +605,31 @@ def retry_dead_letter(channel: str, message_id: str) -> dict:
         ch = conn.channel()
         found = None
         found_tag = None
-        # Scan the DLQ for the matching message_id, nacking-with-requeue
-        # everything we pass over so nothing else is lost.
-        scanned = []
-        while True:
-            method, properties, body = ch.basic_get(queue=dlq_name, auto_ack=False)
+        passed = []
+        while True:  # scan for the id, returning everything else to the queue
+            method, _props, raw = ch.basic_get(queue=dlq_name, auto_ack=False)
             if method is None:
                 break
             try:
-                parsed = json.loads(body.decode("utf-8", errors="replace"))
+                parsed = json.loads(raw.decode("utf-8", errors="replace"))
             except Exception:
                 parsed = None
             if parsed and parsed.get("message_id") == message_id:
-                found = parsed
-                found_tag = method.delivery_tag
+                found, found_tag = parsed, method.delivery_tag
                 break
-            scanned.append(method.delivery_tag)
-
-        for tag in scanned:
+            passed.append(method.delivery_tag)
+        for tag in passed:
             ch.basic_nack(delivery_tag=tag, requeue=True)
-
         if found is None:
-            if found_tag is not None:
-                ch.basic_nack(delivery_tag=found_tag, requeue=True)
-            return {"ok": False, "error": f"message_id {message_id!r} not found in {dlq_name}"}
-
+            return {"ok": False, "error": f"message_id {message_id!r} not found in the {channel} dead-letter queue."}
         ch.basic_ack(delivery_tag=found_tag)
         found.pop("_attempt_count", None)
         republish_from_dead_letter(channel, found)
+        try:  # the log said "failed"; it is queued again now
+            get_repository().update_message_fields(message_id, {"status": "queued", "last_error": None})
+        except Exception:
+            pass
         return {"ok": True, "message_id": message_id, "requeued": True}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
     finally:
         if conn is not None:
             conn.close()
-
-
-# Note: this module is imported by app/main.py, which mounts mcp's routes
-# into the main FastAPI app (same port, path /mcp) rather than running this
-# as a standalone process. No __main__ entrypoint needed here.

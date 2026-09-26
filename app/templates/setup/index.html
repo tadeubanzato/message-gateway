@@ -9,22 +9,23 @@
 <body>
 <div class="page">
   <h1>Set up Message Gateway</h1>
-  <p class="sub">Three quick steps. Your credentials are encrypted and stored locally. Nothing to edit by hand.</p>
+  <p class="sub">Two quick steps. You'll connect email, SMS and push right after, from inside the app.</p>
 
   <div class="steps" id="steps">
-    <span id="s1" class="on">1 · Database</span>
-    <span id="s2">2 · Providers</span>
-    <span id="s3">3 · Finish</span>
+    <span id="s1" class="on">1 · Storage</span>
+    <span id="s2">2 · Administrator</span>
+    <span id="s3">3 · Your API key</span>
   </div>
 
-  <!-- Step 1 -->
+  <!-- Step 1: storage -->
   <section id="step1">
     <div class="card">
       <h2>Where should the gateway keep its data?</h2>
+      <p class="muted" style="margin-top:0">Accounts, message history and your saved credentials (encrypted) go here.</p>
       <label class="opt"><input type="radio" name="backend" value="sqlite" checked />
         <span><b>On this computer (recommended)</b><small>Works immediately. No accounts needed.</small></span></label>
       <label class="opt"><input type="radio" name="backend" value="atlas" />
-        <span><b>MongoDB Atlas (remote)</b><small>Managed cloud database. Needs your Atlas connection string.</small></span></label>
+        <span><b>MongoDB Atlas (remote)</b><small>Managed cloud database. Needs your Atlas connection string. If it already holds a gateway's data, you'll just reconnect to it.</small></span></label>
       <div id="atlasFields" class="hidden">
         <label for="uri">Connection string</label>
         <input id="uri" type="password" autocomplete="off" placeholder="mongodb+srv://user:password@cluster.mongodb.net/" />
@@ -37,22 +38,43 @@
     </div>
   </section>
 
-  <!-- Step 2 -->
+  <!-- Step 2: administrator -->
   <section id="step2" class="hidden">
-    <p class="sub" style="margin-bottom:6px">Set up the channels you want. You can skip any of them.</p>
-    <div id="channels"></div>
-    <div class="row"><button class="btn" id="toFinish">Continue</button></div>
+    <div class="card">
+      <h2>Create the administrator account</h2>
+      <p style="margin-top:0">The administrator runs this gateway. They can:</p>
+      <ul style="margin:0 0 6px;padding-left:20px;font-size:14px">
+        <li>connect and change email, SMS and push providers, and add new ones</li>
+        <li>choose which provider each channel uses by default</li>
+        <li>create and revoke API keys</li>
+        <li>decide whether other people can sign up</li>
+      </ul>
+      <p class="muted">Anyone else who signs up later can send messages but can't change any of this. Use a strong password. It can't be reset by email.</p>
+      <label for="aname">Name</label><input id="aname" autocomplete="name" />
+      <label for="aemail">Email</label><input id="aemail" type="email" autocomplete="username" placeholder="you@example.com" />
+      <label for="apw">Password</label><input id="apw" type="password" autocomplete="new-password" />
+      <label for="apw2">Confirm password</label><input id="apw2" type="password" autocomplete="new-password" />
+      <label class="opt" style="margin-top:14px"><input type="checkbox" id="storeContent" checked />
+        <span><b>Keep a full message log</b><small>Saves the subject and text of each message (encrypted) with time, recipient and delivery status. You can change this later in Settings.</small></span></label>
+      <div class="row"><button class="btn ghost" id="back">Back</button><button class="btn" id="create">Create administrator</button></div>
+      <div id="adminMsg"></div>
+    </div>
   </section>
 
-  <!-- Step 3 -->
+  <!-- Step 3: API key -->
   <section id="step3" class="hidden">
     <div class="card">
-      <h2>All set</h2>
-      <p>Next, create your account. It gives you a key and token for sending messages.</p>
-      <label class="opt"><input type="checkbox" id="storeContent" checked />
-        <span><b>Keep a full message log</b><small>Saves the subject and text of each message (encrypted) along with time, recipient and delivery status, so you can review them later. Uncheck to log only the metadata.</small></span></label>
-      <button class="btn" id="finish">Finish and create my account</button>
-      <div id="finMsg"></div>
+      <h2>You're in. Save your API key</h2>
+      <div class="msg" style="margin:0 0 14px;background:var(--warnbg);color:var(--warn)"><b>This is the only time you'll see this token.</b> Store it in a password manager now. You can create more keys later.</div>
+      <label style="margin-top:0">User key</label>
+      <div class="row"><pre style="flex:1;margin:0"><code id="uk"></code></pre><button class="btn ghost sm" data-copy="uk">Copy</button></div>
+      <label>API token</label>
+      <div class="row"><pre style="flex:1;margin:0"><code id="tk"></code></pre><button class="btn ghost sm" data-copy="tk">Copy</button></div>
+      <h3 style="margin-top:18px">Connect your AI agent (optional)</h3>
+      <p class="muted" style="margin:0 0 6px">Run this in your terminal to let Claude Code send and check messages through the gateway. It contains your key, so run it yourself, not in a chat. Then restart Claude Code or run <code>/mcp</code>.</p>
+      <div class="row"><pre style="flex:1;margin:0;white-space:pre-wrap;word-break:break-all"><code id="mcpcmd"></code></pre><button class="btn ghost sm" data-copy="mcpcmd">Copy</button></div>
+      <p class="muted" style="margin-top:16px"><b>Next:</b> connect your first channel. From the Home page, pick Email, SMS or Push and add a provider.</p>
+      <div class="row"><a class="btn" id="goHome" href="/gateway">I've saved it, continue</a></div>
     </div>
   </section>
 </div>
@@ -60,16 +82,12 @@
 <script>
 const $ = (s, r = document) => r.querySelector(s);
 const api = async (path, body) => {
-  const res = await fetch(path, body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
-  if (!res.ok) { const t = await res.text(); throw new Error(res.status === 403 ? "Setup is already complete." : t); }
-  return res.json();
+  const res = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  let data = {}; try { data = await res.json(); } catch (e) {}
+  if (res.status === 403) { window.location = "/gateway"; throw new Error("Setup is already complete."); }
+  return data;
 };
 const show = (el, text, kind) => { el.innerHTML = ""; const d = document.createElement("div"); d.className = "msg " + kind; d.textContent = text; el.appendChild(d); };
-const CH = { email: "Email", sms: "SMS", push: "Push notifications" };
-let state = null;
-
 function step(n) {
   for (const i of [1, 2, 3]) {
     $("#step" + i).classList.toggle("hidden", i !== n);
@@ -88,82 +106,30 @@ $("#dbNext").onclick = async () => {
     const r = await api("/setup/database", { backend, mongodb_uri: $("#uri").value, mongodb_db: $("#dbname").value });
     if (!r.ok) { show($("#dbMsg"), r.error || "Could not connect.", "err"); return; }
     if (r.already_set_up) { window.location = "/gateway/login"; return; }
-    await loadProviders(); step(2);
+    step(2);
   } catch (e) { show($("#dbMsg"), e.message, "err"); }
   finally { btn.disabled = false; btn.textContent = "Continue"; }
 };
 
-async function loadProviders() {
-  state = await api("/setup/state");
-  const box = $("#channels"); box.innerHTML = "";
-  for (const [ch, spec] of Object.entries(state.catalog)) box.appendChild(channelCard(ch, spec));
-}
-
-function channelCard(ch, spec) {
-  const card = document.createElement("div"); card.className = "card";
-  const names = Object.keys(spec.providers);
-  card.innerHTML = `<h2>${CH[ch]}<span class="tag hidden"></span></h2>
-    <label>Provider</label><select></select>
-    <div class="fields"></div>
-    <div class="row"><button class="btn save">Save &amp; check</button></div><div class="out"></div>`;
-  const sel = $("select", card), fields = $(".fields", card), out = $(".out", card);
-  sel.innerHTML = `<option value="">Skip this channel</option>` + names.map(n => `<option value="${n}">${spec.providers[n].label}</option>`).join("");
-  if (spec.selected && spec.providers[spec.selected]) sel.value = spec.selected;
-  $(".save", card).classList.toggle("hidden", !sel.value);
-
-  const render = () => {
-    fields.innerHTML = ""; out.innerHTML = "";
-    $(".save", card).classList.toggle("hidden", !sel.value);
-    const p = spec.providers[sel.value]; if (!p) return;
-    const help = document.createElement("p"); help.className = "help"; help.textContent = p.help; fields.appendChild(help);
-    for (const f of p.fields) {
-      const l = document.createElement("label"); l.textContent = f.label + (f.optional ? " (optional)" : "");
-      const i = document.createElement("input"); i.dataset.name = f.name; i.autocomplete = "off";
-      i.type = f.secret ? "password" : "text";
-      if (state.configured_settings.includes(f.name)) i.placeholder = "Saved. Leave blank to keep";
-      fields.append(l, i);
-    }
-  };
-  sel.onchange = render; render();
-
-  $(".save", card).onclick = async () => {
-    const values = {}; fields.querySelectorAll("input").forEach(i => { if (i.value.trim()) values[i.dataset.name] = i.value.trim(); });
-    const btn = $(".save", card); btn.disabled = true; btn.textContent = "Checking…";
-    try {
-      const r = await api("/setup/provider", { channel: ch, provider: sel.value, values });
-      if (r.ok) {
-        show(out, "Connected. Credentials verified with the provider.", "ok");
-        $(".tag", card).textContent = "✓ ready"; $(".tag", card).classList.remove("hidden");
-        addTest(card, out, ch);
-      } else show(out, r.error || "The provider rejected these credentials.", "err");
-    } catch (e) { show(out, e.message, "err"); }
-    finally { btn.disabled = false; btn.textContent = "Save & check"; }
-  };
-  return card;
-}
-
-function addTest(card, out, ch) {
-  if ($(".testrow", card)) return;
-  const row = document.createElement("div"); row.className = "row testrow";
-  const needsTo = ch !== "push";
-  row.innerHTML = (needsTo ? `<input class="to" placeholder="${ch === "email" ? "you@example.com" : "+15551234567"}" style="max-width:260px" />` : "") + `<button class="btn ghost">Send a test</button>`;
-  const res = document.createElement("div");
-  card.append(row, res);
-  $("button", row).onclick = async () => {
-    const b = $("button", row); b.disabled = true;
-    try {
-      const r = await api("/setup/test", { channel: ch, to: needsTo ? $(".to", row).value : null });
-      show(res, r.ok ? "Test sent. Check your device or inbox." : (r.error || "Send failed."), r.ok ? "ok" : "err");
-    } catch (e) { show(res, e.message, "err"); }
-    finally { b.disabled = false; }
-  };
-}
-
-$("#toFinish").onclick = () => step(3);
-$("#finish").onclick = async () => {
-  try { const r = await api("/setup/finish", { store_content: $("#storeContent").checked }); window.location = r.next; }
-  catch (e) { show($("#finMsg"), e.message, "err"); }
+$("#back").onclick = () => step(1);
+$("#create").onclick = async () => {
+  const btn = $("#create"); btn.disabled = true; btn.textContent = "Creating…";
+  try {
+    const r = await api("/setup/admin", {
+      name: $("#aname").value, email: $("#aemail").value, password: $("#apw").value, password2: $("#apw2").value,
+      store_content: $("#storeContent").checked,
+    });
+    if (!r.ok) { show($("#adminMsg"), r.error || "Could not create the account.", "err"); return; }
+    $("#uk").textContent = r.user_key; $("#tk").textContent = r.raw_token;
+    $("#mcpcmd").textContent = 'claude mcp add --transport http message-gateway ' + location.origin + '/mcp --header "X-User-Key: ' + r.user_key + '" --header "X-API-Token: ' + r.raw_token + '"';
+    step(3);
+  } catch (e) { show($("#adminMsg"), e.message, "err"); }
+  finally { btn.disabled = false; btn.textContent = "Create administrator"; }
 };
+
+document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () => {
+  navigator.clipboard.writeText(document.getElementById(b.dataset.copy).textContent).then(() => { const o = b.textContent; b.textContent = "Copied"; setTimeout(() => b.textContent = o, 1400); });
+});
 </script>
 </body>
 </html>

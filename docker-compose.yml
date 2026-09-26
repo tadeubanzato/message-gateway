@@ -1,24 +1,34 @@
+name: message-gateway
+
 services:
   gateway:
     build: .
-    image: relay-gateway:local
+    image: message-gateway:local
     restart: unless-stopped
 
-    # Optional: only needed for advanced overrides. Normal setup happens in the
-    # browser at http://localhost:8010 and is stored encrypted in the database.
+    # No .env file is needed. Everything is set up in the browser and stored
+    # encrypted in your database. This file is only read if you create one for
+    # advanced overrides (see .env.example).
     env_file:
       - path: .env
         required: false
 
+    environment:
+      GATEWAY_BASE_URL: http://localhost:${MG_PORT:-8010}
+      PUBLIC_MCP_URL: http://localhost:${MG_PORT:-8010}/mcp
+
     ports:
-      # Bound to localhost on purpose: the first-run setup page is unauthenticated.
-      # To expose the gateway on your network, change to "8010:8000" after setup.
-      - "127.0.0.1:8010:8000"  # HTTP API + portal + MCP server (same uvicorn process)
-      - "127.0.0.1:15672:15672"  # RabbitMQ management UI — localhost only
+      # Bound to localhost on purpose: the first-run setup page has no login.
+      # To reach the gateway from other machines, change the left side to
+      # "${MG_PORT:-8010}:8000" once setup is finished. Set MG_PORT to use a
+      # different port.
+      - "127.0.0.1:${MG_PORT:-8010}:8000"
 
     volumes:
-      - gateway_data:/app/data         # SQLite DB file (when DB_BACKEND=sqlite)
-      - rabbitmq_data:/data/rabbitmq   # RabbitMQ's own persistent state
+      # Your database (when using local SQLite) AND the key that encrypts your
+      # saved credentials live here. Back this volume up (see README).
+      - gateway_data:/app/data
+      - rabbitmq_data:/data/rabbitmq
       - ./app/templates:/app/app/templates:ro
 
 volumes:

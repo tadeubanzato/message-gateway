@@ -1,136 +1,311 @@
-# Relay Gateway
+# Message Gateway
 
-A self-hosted outbound messaging gateway for Email, SMS, and Push notifications —
-one Docker container, one API, configured by talking to an AI agent instead of
-hand-editing config files.
+A self-hosted gateway for sending **email, SMS and push notifications** through one API.
+One Docker container, one place to connect your providers, and a full log of everything
+that was sent. You set it up in your browser: there is no config file to edit, and your
+credentials are stored **encrypted** in the database you choose.
+
+- **Three channels, several providers each.** Email (Mailjet, SendGrid), SMS (Twilio,
+  Infobip, or your own HTTP endpoint) and push (Pushover, ntfy). Connect more than one
+  per channel and pick a default, or choose per message.
+- **Message log.** Every message: time, recipient, content (encrypted), status, provider,
+  attempts and errors.
+- **Works with AI agents.** Connect Claude Code (or any MCP client) and just say
+  "send me a push notification" or "text +1 555 123 4567".
+- **Reliable.** Failed deliveries retry with backoff, then land in a dead-letter queue.
 
 ---
 
-> **Private repo, not yet pushed from this machine.** The repository exists at
-> `https://github.com/tadeubanzato/message-gateway` but is currently
-> **private** and has not yet been pushed to from this development machine
-> (network restrictions here can't reach GitHub). Anyone cloning it needs
-> access granted by the repo owner, and the code needs to actually be pushed
-> before the install flow below works for real. Until then, use the "run it
-> locally" section further down.
+## Contents
 
-## Install — the fast way (Claude Code, Codex, or any shell-capable agent)
+1. [Install](#1-install)
+2. [First-run setup](#2-first-run-setup)
+3. [Connect your channels](#3-connect-your-channels)
+4. [Send your first message](#4-send-your-first-message)
+5. [Connect an AI agent (MCP)](#5-connect-an-ai-agent-mcp)
+6. [Day to day](#6-day-to-day)
+7. [Security notes](#7-security-notes)
+8. [Troubleshooting](#8-troubleshooting)
+9. [Reference](#9-reference)
 
-Paste this into Claude Code, Codex CLI, or any coding agent with shell/git/docker access:
+---
+
+## 1. Install
+
+You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running) and git.
+
+### The fast way: let an AI agent do it
+
+Paste this into Claude Code, Codex CLI or any agent with shell access:
 
 > Please install the message gateway. Instructions are at
-> `https://github.com/tadeubanzato/message-gateway/blob/main/llms.txt` — fetch
-> that file and follow it.
+> `https://github.com/tadeubanzato/message-gateway/blob/main/llms.txt`. Fetch that
+> file and follow it.
 
-That one line stays short and stable even as install steps evolve — the real,
-detailed instructions live in [`llms.txt`](llms.txt), which the agent fetches
-and executes: clone the repo, build and start the container, connect to its
-MCP server, and run the setup wizard, entirely conversationally.
+The agent downloads the project, installs it, and opens the setup page in your browser.
+(It needs an agent that can run shell commands; chat-only apps can't.)
 
-**This only works for agents with real shell execution** (Claude Code, Codex,
-and similar). It will not work in chat-only clients like Claude Desktop or
-ChatGPT — those can't run `git clone` or `docker compose` themselves. If you're
-using one of those, use the manual path below instead.
-
----
-
-## Install — the manual way (any other client, or by hand)
+### The manual way
 
 ```bash
-git clone https://github.com/tadeubanzato/message-gateway
-cd message-gateway
-cp .env.example .env
-docker compose up -d --build
+git clone https://github.com/tadeubanzato/message-gateway ~/message-gateway
+cd ~/message-gateway
+./install.sh
 ```
 
-## Run it locally right now (before this is pushed/published)
+`install.sh` checks Docker, builds and starts the gateway, waits until it is healthy, and
+opens **http://localhost:8010** in your browser. The first build takes a few minutes.
 
-You already have the source on disk. From this folder:
+- Another port: `MG_PORT=9000 ./install.sh`
+- Don't open the browser: `MG_NO_OPEN=1 ./install.sh`
+- Windows: run it from WSL or Git Bash, with Docker Desktop running.
+- Update later: `git pull && ./install.sh` (your data is kept).
 
-```bash
-cp .env.example .env
-docker compose up -d --build
+## 2. First-run setup
+
+The setup page opens automatically. It has three steps:
+
+1. **Storage.** Where the gateway keeps accounts, messages and your saved credentials.
+   - **On this computer** (default): local SQLite. Nothing else needed.
+   - **MongoDB Atlas**: paste your connection string and a database name. In Atlas, allow
+     your IP under *Network Access* and use a user with read/write access. If the database
+     already holds a gateway's data, you simply reconnect to it.
+2. **Create the administrator account.** Enter a name, email and a strong password. The
+   administrator can change all settings, connect and add email/SMS/push providers, manage
+   API keys and decide whether anyone else may sign up. Passwords can't be reset by email,
+   so keep it safe. You can also choose whether to keep a full message log (on by default).
+3. **Save your API key.** Your user key and API token are shown **once**. Store them in a
+   password manager. This screen also shows a ready-made command to connect an AI agent
+   (see [section 5](#5-connect-an-ai-agent-mcp)).
+
+You land on the **Home** page, which shows each channel's status. Next, connect a channel.
+
+> Coming from an older install? **Settings → Import from an existing .env file** reads your
+> old `.env`, saves the provider settings it finds (encrypted), and turns old SMS modem
+> settings into a custom SMS endpoint.
+
+## 3. Connect your channels
+
+Open **Channels** in the top menu (administrator only) and choose Email, SMS or Push. Each
+provider is a card with links (opening in a new tab) to sign in and find your keys. Fill in
+the fields, enter your password to confirm, and click **Connect**. The gateway checks the
+credentials, then **Send test** lets you confirm a real message arrives.
+
+You can connect several providers on one channel. One is the **default**; click **Make
+default** to change it. Saved secrets are never shown again: type a new value to replace one,
+or leave the field blank to keep it.
+
+### Email
+
+| Provider | What you need |
+|---|---|
+| **Mailjet** | API key and secret key (Account → REST API → API Key Management), and a **verified** sender address |
+| **SendGrid** | An API key (Settings → API Keys) and a **verified** sender address |
+
+### SMS
+
+| Provider | What you need |
+|---|---|
+| **Twilio** | Account SID and auth token (Twilio console), and a Twilio phone number to send from |
+| **Infobip** | API key, your base URL and a sender ID (Infobip portal) |
+| **Custom HTTP endpoint** | Your own SMS service. See below |
+
+**Your own SMS endpoint.** Choose *Custom HTTP endpoint*, then enter:
+
+- **Endpoint URL** and **HTTP method** (POST, PUT or PATCH)
+- **Headers**, one per line, for example `Authorization: Bearer <token>` (stored encrypted)
+- **Request body**, a sample JSON containing placeholders. The gateway sends every message
+  in exactly this pattern:
+
+  | Placeholder | Replaced with |
+  |---|---|
+  | `{{to}}` | the phone number, e.g. `+15551234567` |
+  | `{{to_digits}}` | digits only, e.g. `15551234567` |
+  | `{{message}}` | the message text |
+  | `{{message_id}}` | the gateway's id for the message |
+
+  ```json
+  {"number": "{{to}}", "message": "{{message}}"}
+  ```
+
+- Optionally, text the reply **must contain** to count as delivered (for example
+  `"status": "ok"`). Without it, any 2xx reply counts.
+
+A live preview shows the request with a sample number and message, and **Fill in an example**
+loads a starting point. Placeholders are filled in *inside* the JSON, so quotes or newlines in
+a message can't break the request. The gateway calls your URL from this machine, so it must be
+reachable from where Docker runs.
+
+**Default phone number.** On the SMS page, *Channel defaults* lets you set a number (any format,
+country code required). It is used whenever a message doesn't say who to text.
+
+### Push
+
+| Provider | What you need |
+|---|---|
+| **Pushover** | Your user key, plus one or more **applications** (below) |
+| **ntfy** | A topic name (pick a long, hard-to-guess one) and optionally a server URL. Free, no account. Subscribe to the topic in the ntfy app |
+
+**Pushover applications.** Each Pushover application has its own API token (create them at
+pushover.net/apps/build). On the Pushover card, click **+ Add application** for each one:
+give it any name you like, paste its token, and mark one as the **default**. Use the name as
+`"app"` when sending; messages that name no app use the default. Names may contain letters,
+numbers, dots, dashes and underscores. Tokens are stored encrypted, in this form:
+
+```
+PUSHOVER_APPS=alerts:PUSHOVER_APPTOKEN_ALERTS,backups:PUSHOVER_APPTOKEN_BACKUPS
 ```
 
-Wait for the container to report healthy (`docker compose ps`), then open:
+## 4. Send your first message
 
-```
-http://localhost:8010/get-started
-```
-
-That page shows the MCP server URL and a shorter prompt:
-
-> Connect to the MCP server at `http://localhost:8010/mcp` and run through its
-> setup wizard to configure this message gateway.
-
-Paste that into Claude Desktop, ChatGPT (once/if it supports MCP), or whatever
-MCP-capable client you're using, and proceed the same way.
-
----
-
-## What this is
-
-- **One combined container**: RabbitMQ, the HTTP API, the email/SMS/push
-  delivery workers, and the MCP server all run in a single Docker image,
-  supervised by `supervisord`. No multi-container orchestration to reason about.
-- **Two database backends, your choice**: local SQLite (default — zero external
-  accounts needed, works immediately) or MongoDB Atlas (if you want managed
-  backups/HA). Set `DB_BACKEND=sqlite` or `DB_BACKEND=atlas` in `.env`.
-- **Pluggable providers**: swap email between Mailjet/SendGrid, SMS between
-  Twilio/Infobip/your own modem, and push between Pushover/ntfy — all via env
-  vars, no code changes.
-- **Reliable by design**: failed deliveries retry with backoff, then land in a
-  per-channel dead-letter queue instead of vanishing. Every message and delivery
-  attempt is logged (auto-cleaned after 90 days) so you can see what happened.
-- **MCP-native**: the same MCP server that walks you through setup also lets
-  you send notifications, check queue depth, inspect recent messages and
-  delivery attempts, peek at dead letters, and retry failed sends — all by
-  asking your agent, instead of a web dashboard.
-
-## Sending a message (once configured)
+Create keys on the **API keys** page (one per program that sends), then:
 
 ```bash
 curl -X POST http://localhost:8010/v1/messages \
   -H "X-User-Key: <your user key>" \
   -H "X-API-Token: <your api token>" \
   -H "Content-Type: application/json" \
-  -d '{"channel": "email", "to": "you@example.com", "subject": "Hi", "body": "Hello!"}'
+  -d '{"channel": "push", "subject": "Hello", "body": "It works!"}'
 ```
 
-Get your user key and API token by registering at `http://localhost:8010/gateway/register`.
+| Channel | Fields |
+|---|---|
+| `push` | `body`; optional `subject` (title), `app`, `device`, `url`, `url_title` |
+| `email` | `to`, `subject`, `body`; optional `emailType` (`txt` or `html`) |
+| `sms` | `body`; `to`, or omit it to use the default phone number |
 
-Or, once your agent is connected via MCP, just ask it to send a notification —
-it has a `send_notification` tool for exactly this.
+Every channel also accepts:
 
-## API reference
+- **`provider`**: pick a connected provider for this message, e.g. `"provider": "sendgrid"`.
+  Without it the channel's default is used.
+- **`template` + `context`**: use a server-side template instead of `body`.
 
-- Scalar (recommended, dark mode): `http://localhost:8010/scalar`
+`to` may be a list. If nothing is connected for the channel, the API answers immediately with
+a clear error instead of queueing a message that can't be delivered.
+
+Other endpoints: `GET /v1/providers` (what you can use), `GET /v1/messages` (your log),
+`GET /v1/messages/{id}` (one message with its delivery attempts).
+
+## 5. Connect an AI agent (MCP)
+
+The MCP server lets an AI agent send messages and check delivery. It uses the **same key and
+token** as the API, so connecting is one command. The last setup screen (and every new key)
+shows it ready to copy. Run it **in your own terminal** (it contains your token), then restart
+Claude Code or run `/mcp`:
+
+```bash
+claude mcp add --transport http message-gateway http://localhost:8010/mcp \
+  --header "X-User-Key: <your user key>" --header "X-API-Token: <your api token>"
+```
+
+Then just ask, for example:
+
+- "Send me a push notification saying the deploy finished."
+- "Send a test email."
+- "Send an SMS to +1 555 123 4567 saying I'm running late."
+- "Text me that dinner is ready." (uses the default phone number)
+- "Which providers are connected? Did my last message get delivered?"
+
+Each send waits a few seconds and reports **delivered** or **failed** with the reason. Phone
+numbers can be typed any way (`+1 (555) 123-4567`); a number without a country code is never
+guessed, the agent is told to ask for it.
+
+| Tool | Use |
+|---|---|
+| `send_push`, `send_email`, `send_sms`, `send_test` | The common sends. `send_test` with no address emails **you** |
+| `send_notification` | Any channel, templates, full control |
+| `list_providers`, `get_setup_status`, `get_setup_instructions`, `get_health` | See what's connected and where to set up the rest |
+| `list_recent_messages`, `get_message`, `list_delivery_attempts` | Your own messages and their delivery |
+| `check_provider_config`, `get_queue_status`, `list_dead_letters`, `retry_dead_letter` | **Administrator only** |
+
+Provider credentials are never handled through MCP: they are entered in the web app.
+
+## 6. Day to day
+
+- **Home**: channel status, recent messages, a copyable send example.
+- **Message log**: search and filter everything sent; click a message for its delivery attempts.
+- **API keys**: create, replace or delete keys. A replaced token stops working immediately.
+- **Settings** (user menu, administrator): keep or drop message content, allow sign-ups, import an old `.env`.
+- **Account** (user menu): your profile and password.
+
+Manage the container from the project folder:
+
+```bash
+docker compose stop            # stop
+docker compose start           # start again
+docker compose logs gateway    # see what's happening
+./install.sh                   # rebuild after updating (data is kept)
+docker compose down -v         # UNINSTALL: deletes local data and the encryption key
+```
+
+## 7. Security notes
+
+- **Localhost only.** The gateway listens on `127.0.0.1` because the first-run setup page has
+  no login. To reach it from other machines, change the port mapping in `docker-compose.yml`
+  *after* setup, and put it behind HTTPS.
+- **Administrator vs members.** The first account is the administrator. Sign-ups are off by
+  default. Members can send messages but can't change settings. Changing credentials asks for
+  the administrator's password again.
+- **Back up your data.** With local storage, your database *and the key that decrypts your
+  saved credentials* live in the `gateway_data` Docker volume. Back it up with
+  `docker compose cp gateway:/app/data ./gateway-backup` and keep that copy private. If the
+  key is lost while a remote database is kept, the app tells you which credentials can't be
+  read so you can enter them again.
+- **MCP uses your API key.** Tools act only on your own messages; queue, dead-letter and
+  provider-check tools are administrator-only.
+- Recipients (emails, phone numbers) are stored in plain text so they can be searched.
+  Subjects, bodies and credentials are encrypted.
+- The gateway calls provider APIs, and your custom SMS URL, from your machine.
+
+## 8. Troubleshooting
+
+| Symptom | What to do |
+|---|---|
+| `install.sh`: "Docker is not running" | Start Docker Desktop, wait until it says it's running, run it again |
+| "Port 8010 is already in use" | `MG_PORT=9000 ./install.sh` |
+| Setup page doesn't open | Open `http://localhost:8010` yourself |
+| Red banner: "not on a persistent volume" | You started it without `install.sh`; use `./install.sh` so data survives |
+| "N saved credentials can't be read" | The encryption key changed (volume replaced); enter them again on the Channels pages. Old API keys may need re-creating |
+| A send returns "No … provider is connected" | The administrator connects one under Channels |
+| Mail is rejected | The sender address must be verified with Mailjet/SendGrid |
+| SMS says "failed" with your endpoint | Check the URL, headers and body preview; add or fix the "response must contain" text |
+| Forgot the administrator password | Passwords can't be reset by email; restore from a backup, or reinstall with `docker compose down -v` |
+| Anything else | `docker compose logs gateway` |
+
+## 9. Reference
+
+### Advanced: `.env` overrides
+
+You don't need a `.env` file. To pin a setting from the environment, copy `.env.example` to
+`.env`, uncomment only what you need, and run `docker compose up -d --force-recreate`
+(`restart` doesn't reload it). Anything set there **overrides** the browser settings, which
+then can't change it (the Channels page tells you when that happens).
+
+### API documentation
+
+- Interactive: `http://localhost:8010/scalar`
 - Swagger: `http://localhost:8010/docs`
+- The **About** page in the app lists the main endpoints.
 
-## Architecture
+### Architecture
 
 ```
-llms.txt             agent-readable install instructions (fetched by the primary install prompt)
-docker-compose.yml   single service, one image
+install.sh           builds, starts and opens the setup page
+llms.txt             instructions an AI agent follows to install this
+docker-compose.yml   one service, two volumes, localhost-only port
 Dockerfile           RabbitMQ + Python app, supervised by supervisord
 app/
-  main.py            FastAPI app: HTTP API, portal, /get-started, /scalar, mounts MCP routes
-  db/                 repository interface + sqlite/atlas backends
-  services/
-    email/            EmailProvider ABC + mailjet/sendgrid
-    sms/               SmsProvider ABC + twilio/infobip/local_modem
-    push/              PushProvider ABC + pushover/ntfy
-  workers/            email/sms/push consumer loops (retry + DLQ)
-  mcp_server/         send / setup-wizard / operator MCP tools
-  routes/portal.py    login/register/account/token pages
-  templates/          Jinja2 templates (portal + message templates)
+  main.py            FastAPI app: messages API, mounts the MCP server
+  bootstrap.py       auto-generated keys and the DB choice (in the data volume)
+  db/                repository interface + sqlite / atlas backends
+  routes/            first-run setup, login and keys, portal pages
+  services/          channels, encrypted settings, message log, providers
+    sms/custom_http  your own SMS endpoint (URL, headers, JSON pattern)
+  workers/           email / sms / push consumers (retry + dead letters)
+  mcp_server/        MCP tools and their key-based login
+  templates/, static/  pages, shared stylesheet and script
 ```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-## Contributing
-
-Issues and PRs welcome. See [CHANGELOG.md](CHANGELOG.md) for release history.
-This project follows [Semantic Versioning](https://semver.org/).
+MIT, see [LICENSE](LICENSE). Release history is in [CHANGELOG.md](CHANGELOG.md).

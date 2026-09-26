@@ -1,38 +1,41 @@
 """
-First-run onboarding: pick a database, enter provider credentials, send a test.
+First-run setup: choose where data is stored, then create the administrator.
 
-Credentials entered here are stored encrypted in the database (see
-app.services.secret_store), so a fresh install needs no .env editing.
+That is all the unauthenticated setup does. Providers (email, SMS, push) are
+connected afterwards on the Channels pages, by the logged-in administrator, so
+credentials never pass through an unauthenticated endpoint.
 
-Security model: these endpoints are open only while setup is incomplete (a fresh
-install, reachable from localhost by default). Once /setup/finish is called they
-all return 403. Stored secret values are never returned — only which settings
-are configured.
+Security model: these endpoints work only while no account exists. Once the
+administrator is created every one of them returns 403. If the database is
+configured as Atlas but unreachable, setup stays locked rather than open, so a
+temporary outage can't be used to repoint the gateway at another database.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from app import bootstrap
 from app.db import backend_name, get_repository, reset_repository
-from app.services import channels, secret_store
+from app.routes.portal import AccountError, _set_session_cookie, create_account
+from app.services import access, secret_store
 
 router = APIRouter()
 
-SETUP_COMPLETE_KEY = "SETUP_COMPLETE"
 _PAGE = os.path.join(os.path.dirname(__file__), "..", "templates", "setup", "index.html")
 
+
 def _is_complete() -> bool:
+    """Setup is complete once an account (the administrator) exists."""
     try:
-        return secret_store.get_setting(SETUP_COMPLETE_KEY) == "1"
+        return access.has_accounts()
     except Exception:
-        return False
+        return bool(bootstrap.get("mongodb_uri"))  # fail closed when a remote DB is configured
 
 
 def _require_open() -> None:
@@ -45,13 +48,13 @@ def _require_open() -> None:
 # ---------------------------------------------------------------------
 @router.get("/", include_in_schema=False)
 def root():
-    return RedirectResponse("/gateway/login" if _is_complete() else "/setup", status_code=307)
+    return RedirectResponse("/gateway" if _is_complete() else "/setup", status_code=307)
 
 
 @router.get("/setup", include_in_schema=False)
 def setup_page():
     if _is_complete():
-        return RedirectResponse("/gateway/login", status_code=307)
+        return RedirectResponse("/gateway", status_code=307)
     return FileResponse(_PAGE, media_type="text/html")
 
 
@@ -65,17 +68,7 @@ def setup_state():
         db_ok = get_repository().ping()
     except Exception:
         db_ok = False
-    configured = set(secret_store.stored_setting_names()) if db_ok else set()
-    catalog = channels.public_catalog()
-    for ch, spec in channels.CATALOG.items():
-        catalog[ch]["selected"] = secret_store.get_setting(spec["selector"]) if db_ok else None
-    return {
-        "backend": backend_name(),
-        "db_ok": db_ok,
-        "mongodb_db": bootstrap.get("mongodb_db"),
-        "configured_settings": sorted(configured),
-        "catalog": catalog,
-    }
+    return {"backend": backend_name(), "db_ok": db_ok, "mongodb_db": bootstrap.get("mongodb_db")}
 
 
 class DatabaseChoice(BaseModel):
@@ -106,39 +99,31 @@ def setup_database(body: DatabaseChoice):
         ok = get_repository().ping()
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"Database not reachable ({type(e).__name__})."}
+    # An existing gateway database (accounts already there) means we are just
+    # reconnecting to it: nothing more to set up.
     return {"ok": ok, "backend": backend_name(), "already_set_up": _is_complete()}
 
 
-class ProviderChoice(BaseModel):
-    channel: str
-    provider: str
-    values: dict[str, str] = Field(default_factory=dict)
-
-
-@router.post("/setup/provider", include_in_schema=False)
-def setup_provider(body: ProviderChoice):
-    _require_open()
-    return channels.apply_provider(body.channel, body.provider, body.values)
-
-
-class TestSend(BaseModel):
-    channel: str
-    to: Optional[str] = None
-
-
-@router.post("/setup/test", include_in_schema=False)
-def setup_test(body: TestSend):
-    _require_open()
-    return channels.send_test(body.channel, body.to)
-
-
-class Finish(BaseModel):
+class AdminBody(BaseModel):
+    name: str
+    email: str
+    password: str
+    password2: str
     store_content: bool = True
 
 
-@router.post("/setup/finish", include_in_schema=False)
-def setup_finish(body: Finish):
+@router.post("/setup/admin", include_in_schema=False)
+def setup_admin(body: AdminBody):
     _require_open()
+    try:
+        account, raw_token, sid = create_account(
+            body.name, body.email, body.password, body.password2, make_admin=True
+        )
+    except AccountError as e:
+        return JSONResponse({"ok": False, "error": e.message}, status_code=e.status)
     secret_store.set_setting("STORE_MESSAGE_CONTENT", "1" if body.store_content else "0")
-    secret_store.set_setting(SETUP_COMPLETE_KEY, "1")
-    return {"ok": True, "next": "/gateway/register"}
+    resp = JSONResponse({
+        "ok": True, "user_key": account["user_key"], "raw_token": raw_token, "next": "/gateway",
+    })
+    _set_session_cookie(resp, sid)
+    return resp

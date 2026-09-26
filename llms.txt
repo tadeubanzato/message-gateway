@@ -1,99 +1,143 @@
-# Relay Gateway — Agent Install Instructions
+# Message Gateway: agent install instructions
 
-You are an AI coding agent (Claude Code, Codex CLI, or similar) with shell,
-git, and Docker execution access. A user has asked you to install this
-project. Follow these steps in order.
+You are an AI coding agent (Claude Code, Codex CLI, or similar) with shell
+access. A user asked you to install Message Gateway, a self-hosted gateway for
+sending email, SMS and push notifications through one API.
 
-## 1. Clone the repository
+Your job has three parts, in this order:
 
-```
-git clone https://github.com/tadeubanzato/message-gateway
-cd message-gateway
-```
+  1. DOWNLOAD the project
+  2. INSTALL and start it
+  3. OPEN the setup page in the user's default browser
 
-Note: this repository is currently **private**. If the clone fails with an
-authentication/permission error, the user (or you, the agent, if you have
-GitHub credentials configured) needs to authenticate as a user with access
-before cloning will work — do not assume the repo is public.
+The user then finishes setup in their browser. Do not ask them for API keys,
+passwords or any other secret in this chat, and do not create a `.env` file.
 
-## 2. Prepare the environment file
+## 0. Prerequisites
 
-```
-cp .env.example .env
-```
+Run these two checks:
 
-Do not edit `.env` yet — leave it at its defaults for now. It defaults to
-`DB_BACKEND=sqlite`, which requires no external accounts and works
-immediately.
+    git --version
+    docker info
 
-## 3. Build and start the container
+- `git` missing: tell the user to install git, then stop.
+- `docker` missing: tell the user to install Docker Desktop
+  (https://www.docker.com/products/docker-desktop/), start it, and tell you when
+  it is running. Stop until they do.
+- Docker installed but "Cannot connect to the Docker daemon": ask the user to
+  start Docker Desktop and wait until it says it is running, then re-check.
+- Do not try to install git or Docker yourself.
 
-```
-docker compose up -d --build
-```
+On Windows, run the commands below in WSL or Git Bash (the installer is a bash
+script). Docker Desktop must be running.
 
-Wait for the container to report healthy:
+## 1. Download
 
-```
-docker compose ps
-```
+Clone into the user's home directory (or the folder they named, if they gave
+one):
 
-If it does not become healthy within a couple of minutes, check logs with
-`docker compose logs` and report the failure to the user rather than retrying
-indefinitely.
+    git clone https://github.com/tadeubanzato/message-gateway ~/message-gateway
+    cd ~/message-gateway
 
-## 4. Connect to the MCP server
+- If `~/message-gateway` already exists, do not clone again: `cd` into it and run
+  `git pull`.
+- If the clone fails with an authentication or "repository not found" error, the
+  repository is private and the user needs GitHub access. Tell them to run
+  `gh auth login` (or otherwise sign in to GitHub), then retry. Do not work
+  around it.
 
-Once healthy, the gateway exposes an MCP server at:
+## 2. Install
 
-```
-http://localhost:8010/mcp
-```
+    ./install.sh
 
-Connect to it using whatever MCP-client mechanism you have available.
+This builds the container (the first build takes a few minutes; be patient),
+starts it, waits until it reports healthy, and then tries to open the setup page
+in the default browser. There is nothing to configure first.
 
-## 5. Run the setup wizard
+- If the port is busy, run `MG_PORT=9000 ./install.sh` and use that port in the
+  steps below instead of 8010.
+- If it fails, show the user the relevant lines it printed, fix the cause (Docker
+  not running, port in use), and run it again. Do not retry in a loop.
+- `./install.sh` is safe to run again: it rebuilds and restarts and keeps data.
 
-Once connected, call the wizard tools in this order:
+## 3. Open the setup page in the user's default browser
 
-1. `get_setup_status()` — see what's already configured (fresh installs will
-   show nothing configured yet).
-2. `list_providers("email")`, `list_providers("sms")`, `list_providers("push")`
-   — show the user their options for each channel and ask which they want.
-3. For each channel the user picks a provider for, call
-   `get_setup_instructions(provider)` — this returns which environment
-   variables to set and where to obtain the values. **This tool does not
-   accept or need secret values as arguments — do not ask the user to paste
-   API keys/tokens into this chat.** Instead, tell the user to open `.env` in
-   the cloned repo themselves and set the variables it lists.
-4. After the user confirms they've edited `.env`, tell them to run:
-   ```
-   docker compose restart
-   ```
-   (This project deliberately does not auto-restart itself — do not attempt
-   to restart the container via the Docker socket or any other automated
-   means on the user's behalf; this was an explicit security decision by the
-   project, not an oversight.)
-5. Call `check_provider_config(channel)` to verify the new credentials work.
-   If it fails, relay the specific error back to the user and offer to
-   re-check after they fix it — do not guess at what's wrong.
-6. Repeat for each channel the user wants configured. Push/SMS/email are all
-   independent — the gateway works with only one or two configured if that's
-   all the user needs.
+`./install.sh` ends with one of these lines. Read your command output:
 
-## 6. Confirm completion
+- "Opened the setup page in your default browser: http://localhost:8010"
+  Good, nothing more to do for this step.
+- "Could not open a browser automatically. Open this address yourself: ..."
+  Try to open it for the user with the command for their system:
 
-Once `check_provider_config` passes for at least the channel(s) the user
-cares about, tell the user the gateway is installed and configured, and that
-they can now ask you (or any MCP-connected agent) to send notifications via
-the `send_notification` tool, or inspect queue status / message history /
-dead letters via the operator tools the same MCP server exposes.
+      macOS:        open http://localhost:8010
+      Linux:        xdg-open http://localhost:8010
+      Windows/WSL:  cmd.exe /c start "" http://localhost:8010
+
+  If you are running somewhere the user's browser can't be reached (a remote
+  machine, container or cloud sandbox), do not try further. Give the user the
+  address and ask them to open it.
+
+## 4. Hand over to the user
+
+Tell the user, in your own words:
+
+    Message Gateway is running. I've opened http://localhost:8010 in your
+    browser. Finish setup there. It takes a couple of minutes:
+      1. Storage: keep the data on this computer (default), or use MongoDB Atlas.
+      2. Create the administrator account. The administrator can change all
+         settings, connect and add email / SMS / push providers, and manage API
+         keys.
+      3. Save your API key. It is shown only once.
+    After that, connect your first channel from the Channels menu or the Home
+    page (Email, SMS or Push). Every provider card links to that provider's
+    sign-in page. For SMS through their own service, they pick "Custom HTTP
+    endpoint" and give the URL and a sample JSON body. Moving from an older
+    install? Settings has an "Import from an existing .env file" option. Their
+    credentials are typed into the browser and stored encrypted. They never
+    come through this chat.
+
+Then wait for the user to say they are done. If they ask which provider to pick:
+Pushover or ntfy for push (ntfy needs no account), Mailjet or SendGrid for email,
+Twilio for SMS.
+
+## 5. Connect to the gateway (optional, after setup)
+
+The last setup screen shows a `claude mcp add ...` command that contains the
+user's own API key. Tell the user to copy it from that screen and run it in their
+own terminal, then restart Claude Code (or run `/mcp`). Do NOT ask them to paste
+the key or token into this chat, and do not try to create or guess a key yourself.
+
+Once connected, the MCP tools work with the user's key: `send_notification`,
+`list_providers`, `list_recent_messages`, `get_message`, `get_setup_status`. The
+administrator's key also unlocks `check_provider_config`, `get_queue_status`,
+`list_dead_letters` and `retry_dead_letter`. Connecting providers is done in the
+web app only.
+
+## 6. Verify
+
+    curl -fsS http://127.0.0.1:8010/health
+
+Expect `"ok":true`, `"db_ok":true` and `"data_persistent":true`. If
+`data_persistent` is false, the data is not on a Docker volume and would be lost
+when the container is removed; tell the user and re-run `./install.sh`. Report the
+result. That is the end of the install.
 
 ## Notes for the agent
 
-- Never write real secret values into any file yourself — the user edits
-  `.env` directly. Your role is to explain what's needed and verify it after
-  the fact, not to collect or relay credentials.
-- If the user's client doesn't support the operations above (no shell, no
-  MCP), stop and tell them to use the manual install path documented in
-  README.md instead.
+- Never ask the user to paste API keys, tokens or passwords into this chat, and
+  never write secrets into any file.
+- Do not create a `.env` file. Values in `.env` override what the user enters in
+  the browser, and the pages could not change them.
+- The gateway listens on localhost only. To reach it from another machine the
+  user must change the port binding in `docker-compose.yml` after setup.
+- Useful commands (run in ~/message-gateway):
+    docker compose stop          stop it
+    docker compose start         start it again
+    docker compose logs gateway  see what is happening
+    docker compose down -v       uninstall and DELETE local data and the
+                                 encryption key. Only if the user asks
+- With local storage, the data and the encryption key that protects saved
+  credentials live in the `gateway_data` Docker volume. Suggest a backup if it
+  matters to them.
+- If the user cannot run Docker or a shell, stop and tell them to follow the
+  manual steps in README.md.

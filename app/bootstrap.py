@@ -134,3 +134,13 @@ def file_version() -> Optional[int]:
         return os.stat(BOOTSTRAP_PATH).st_mtime_ns
     except FileNotFoundError:
         return None
+
+
+def data_is_persistent() -> bool:
+    """True when the data directory is a mounted volume (so it survives the
+    container being removed). False when running without one, e.g. a plain
+    `docker run`: everything would be lost with the container."""
+    try:
+        return os.path.ismount(DATA_DIR)
+    except OSError:
+        return False

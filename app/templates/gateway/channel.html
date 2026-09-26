@@ -5,12 +5,16 @@
 <div class="row between"><h1 style="margin:0">{{ ch.label }}</h1><span class="badge {{ ch.state }}" id="chBadge"></span></div>
 <p class="sub" id="chSummary"></p>
 
+{% if unreadable %}
+<div class="msg err" style="margin:0 0 14px"><b>{{ unreadable }} saved credential{{ '' if unreadable == 1 else 's' }} can't be read.</b> The encryption key changed (for example the data volume was replaced while the database was kept). Enter the affected credentials again below. Old API tokens may also need to be recreated.</div>
+{% endif %}
 <div class="card">
   <h3>Choosing a provider per message</h3>
   <p class="muted" style="margin:0 0 8px">Messages use the default provider unless the API call names another connected one:</p>
   <pre style="margin:0"><code>{"channel": "{{ ch.channel }}", ... , "provider": "<span id="exProv">{{ (ch.connected | map(attribute='name') | list)[0] if ch.connected else 'provider-name' }}</span>"}</code></pre>
 </div>
 
+<div id="defaults"></div>
 <div id="providers"></div>
 {% endblock %}
 {% block scripts %}
@@ -35,17 +39,78 @@
     const spec = SPEC.providers[p.name];
     const el = document.createElement("div"); el.className = "pcard" + (p.is_default && p.connected ? " is-default" : ""); el.id = p.name;
     el.innerHTML = `<div class="row between"><h3>${spec.label}</h3><span class="row" style="gap:6px" data-badges></span></div>
-      <p class="help" style="margin:6px 0 0">${spec.help}</p>
+      <p class="help" style="margin:6px 0 0" data-help></p>
+      <div class="row" data-links style="gap:14px;margin:6px 0 0"></div>
       <div data-fields></div>
       <label>Your password (to confirm changes)</label><input type="password" data-pw autocomplete="current-password" style="max-width:300px" />
       <div class="actions" data-actions></div><div data-out></div>`;
-    const saved = new Set(p.fields.filter(f => f.set).map(f => f.name));
+    $("[data-help]", el).textContent = spec.help;
+    for (const l of (spec.links || [])) {   // sign-in / API-key pages open in a new tab
+      const a = document.createElement("a"); a.href = l.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.textContent = l.label + " ↗"; a.style.fontSize = "13px"; $("[data-links]", el).appendChild(a);
+    }
+    const state = Object.fromEntries(p.fields.map(f => [f.name, f]));
     const fields = $("[data-fields]", el);
+    const renderPreview = (text) => {
+      const sample = { to: "+15551234567", to_digits: "15551234567", message: "Hello from Message Gateway", message_id: "abc123" };
+      const fill = (v) => typeof v === "string" ? v.replace(/\{\{\s*(to_digits|to|message_id|message)\s*\}\}/g, (m, k) => sample[k])
+        : Array.isArray(v) ? v.map(fill) : (v && typeof v === "object") ? Object.fromEntries(Object.entries(v).map(([k, x]) => [fill(k), fill(x)])) : v;
+      try { return JSON.stringify(fill(JSON.parse(text)), null, 2); } catch (e) { return "Not valid JSON yet: " + e.message; }
+    };
     for (const f of spec.fields) {
       const l = document.createElement("label"); l.textContent = f.label + (f.optional ? " (optional)" : "");
-      const i = document.createElement("input"); i.dataset.name = f.name; i.autocomplete = "off"; i.type = f.secret ? "password" : "text";
-      if (saved.has(f.name)) i.placeholder = f.secret ? "•••••••• saved. Type to replace" : "Saved. Type to replace";
+      let i;
+      if (f.type === "textarea") { i = document.createElement("textarea"); i.rows = 5; i.spellcheck = false; i.style.cssText = "width:100%;font-family:ui-monospace,monospace;font-size:13px"; }
+      else if (f.type === "select") { i = document.createElement("select"); (f.options || []).forEach(o => i.add(new Option(o, o))); }
+      else { i = document.createElement("input"); i.type = f.secret ? "password" : "text"; }
+      i.dataset.name = f.name; i.autocomplete = "off"; if (f.placeholder) i.placeholder = f.placeholder;
+      const st = state[f.name] || {};
+      if (st.set && st.value) i.value = st.value;                       // non-secret values are shown so they can be edited
+      else if (st.set) i.placeholder = "•••••••• saved. Type to replace";  // secrets are never shown again
+      else if (f.default && i.tagName === "SELECT") i.value = f.default;
       fields.append(l, i);
+      if (f.preview) {
+        const pl = document.createElement("label"); pl.textContent = "Preview (with a sample number and message)";
+        const pre = document.createElement("pre"); pre.style.margin = "0"; const code = document.createElement("code"); pre.appendChild(code);
+        const upd = () => { code.textContent = renderPreview(i.value); };
+        i.addEventListener("input", upd); upd(); fields.append(pl, pre);
+      }
+    }
+    if (spec.example) {
+      const ex = document.createElement("button"); ex.type = "button"; ex.className = "btn ghost sm"; ex.style.marginTop = "10px"; ex.textContent = "Fill in an example";
+      ex.onclick = () => fields.querySelectorAll("[data-name]").forEach(i => {
+        const v = spec.example[i.dataset.name]; if (v !== undefined && !i.value.trim()) { i.value = v; i.dispatchEvent(new Event("input")); }
+      });
+      fields.append(ex);
+    }
+    if (p.env_locked && p.env_locked.length) {
+      const n = document.createElement("div"); n.className = "msg"; n.style.cssText = "background:var(--warnbg);color:var(--warn);margin:10px 0 0";
+      n.textContent = "These settings come from environment variables and override what you save here: " + p.env_locked.join(", ") + ". Remove them from your .env file and recreate the container to manage them on this page.";
+      fields.prepend(n);
+    }
+    let appRows = null;
+    if (spec.apps) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = `<label style="margin-top:16px">Applications</label>
+        <p class="help" style="margin:0 0 8px">Each Pushover application has its own token. Name them anything you like and use that name as <code>"app"</code> when sending. The default app is used when a message names none.</p>
+        <div data-apps></div><button type="button" class="btn ghost sm" data-addapp>+ Add application</button>`;
+      fields.appendChild(wrap);
+      appRows = $("[data-apps]", wrap);
+      const addRow = (a) => {
+        const row = document.createElement("div"); row.className = "row"; row.style.cssText = "gap:8px;margin-bottom:8px;flex-wrap:nowrap";
+        row.innerHTML = `<input data-appname placeholder="app name (e.g. alerts)" autocomplete="off" style="flex:1;min-width:110px" />
+          <input data-apptoken type="password" autocomplete="off" style="flex:2;min-width:140px" />
+          <label class="row" style="margin:0;gap:4px;color:var(--fg);font-size:13px;white-space:nowrap"><input type="radio" name="defapp-${p.name}" data-appdefault style="width:auto" /> default</label>
+          <button type="button" class="btn danger sm" data-appremove title="Remove application">×</button>`;
+        const nm = $("[data-appname]", row), tk = $("[data-apptoken]", row);
+        nm.value = a.name; if (!a.isNew) { nm.readOnly = true; nm.style.opacity = ".7"; }
+        tk.placeholder = a.set ? "•••••••• saved. Type to replace" : "API token";
+        $("[data-appdefault]", row).checked = !!a.is_default;
+        $("[data-appremove]", row).onclick = () => row.remove();
+        appRows.appendChild(row);
+      };
+      (p.apps && p.apps.length ? p.apps : [{ name: "default", set: false, is_default: true, isNew: true }]).forEach(addRow);
+      $("[data-addapp]", wrap).onclick = () => addRow({ name: "", set: false, is_default: false, isNew: true });
     }
     const badges = $("[data-badges]", el);
     badges.innerHTML = (p.is_default && p.connected ? '<span class="badge default">Default</span>' : "") + (p.connected ? '<span class="badge connected">Connected</span>' : '<span class="badge not_set_up">Not connected</span>');
@@ -60,14 +125,21 @@
     };
 
     btn(p.connected ? "Save & check" : "Connect", "", async (b) => {
-      const values = {}; fields.querySelectorAll("input").forEach(i => { if (i.value.trim()) values[i.dataset.name] = i.value.trim(); });
+      const values = {}; fields.querySelectorAll("input,textarea,select").forEach(i => { if (i.dataset.name && i.value.trim()) values[i.dataset.name] = i.value.trim(); });
+      const extra = {};
+      if (appRows) {
+        const rows = [...appRows.children];
+        extra.apps = rows.map(r => ({ name: $("[data-appname]", r).value.trim(), token: $("[data-apptoken]", r).value.trim() }));
+        const d = rows.find(r => $("[data-appdefault]", r).checked);
+        extra.default_app = d ? $("[data-appname]", d).value.trim() : null;
+      }
       b.textContent = "Checking…";
-      const r = await run(b, "/save", { values }); if (!r) return;
+      const r = await run(b, "/save", { values, ...extra }); if (!r) return;
       if (r.ok) { render(); const c = document.getElementById(p.name); say($("[data-out]", c), "Saved. The provider accepted these credentials.", "ok"); }
       else { header(); say(out, r.error || "The provider rejected these credentials.", "err"); render(p.name, r.error); }
     });
     if (p.connected) {
-      btn("Send test", "ghost", () => window.MG.openTest(CH, LABEL, status.connected, status.default, p.name));
+      btn("Send test", "ghost", () => window.MG.openTest(CH, LABEL, status.connected, status.default, p.name, p.apps));
       if (!p.is_default) btn("Make default", "ghost", async (b) => { const r = await run(b, "/default", {}); if (r) { if (r.ok) render(); else say(out, r.error, "err"); } });
       let armed = false;
       btn("Remove", "danger", async (b) => {
@@ -78,8 +150,36 @@
     return el;
   }
 
+  function defaultsCard() {
+    const box = $("#defaults"); box.innerHTML = "";
+    if (!status.defaults || !status.defaults.length) return;
+    const el = document.createElement("div"); el.className = "card";
+    el.innerHTML = `<h3>Channel defaults</h3><div data-rows></div>
+      <label>Your password (to confirm changes)</label><input type="password" data-pw autocomplete="current-password" style="max-width:300px" />
+      <div class="actions"><button class="btn" data-save>Save defaults</button></div><div data-out></div>`;
+    const rows = $("[data-rows]", el);
+    for (const d of status.defaults) {
+      const l = document.createElement("label"); l.textContent = d.label;
+      const i = document.createElement("input"); i.dataset.name = d.name; i.value = d.value || ""; i.placeholder = d.placeholder || ""; i.autocomplete = "off"; i.style.maxWidth = "320px";
+      const h = document.createElement("p"); h.className = "help"; h.style.margin = "4px 0 0"; h.textContent = d.help;
+      rows.append(l, i, h);
+    }
+    $("[data-save]", el).onclick = async (ev) => {
+      const values = {}; rows.querySelectorAll("input").forEach(i => values[i.dataset.name] = i.value.trim());
+      const b = ev.target; b.disabled = true; const out = $("[data-out]", el);
+      try {
+        const r = await post("/gateway/channels/" + CH + "/defaults", { values, password: $("[data-pw]", el).value });
+        if (r.status) status = r.status;
+        $("[data-pw]", el).value = "";
+        r.ok ? say(out, "Saved.", "ok") : say(out, r.error || "Could not save.", "err");
+      } catch (e) { say(out, e.message, "err"); } finally { b.disabled = false; }
+    };
+    box.appendChild(el);
+  }
+
   function render(keepMsgFor, msg) {
     header();
+    defaultsCard();
     const box = $("#providers"); box.innerHTML = "";
     status.providers.forEach(p => box.appendChild(card(p)));
     if (keepMsgFor && msg) say($("[data-out]", document.getElementById(keepMsgFor)), msg, "err");

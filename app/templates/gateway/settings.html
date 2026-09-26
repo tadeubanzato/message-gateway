@@ -21,6 +21,18 @@
 </div>
 
 <div class="card">
+  <h2>Import from an existing .env file</h2>
+  <p class="muted" style="margin-top:0">Moving from an older install? Choose or paste its <code>.env</code> file and the gateway saves the email, SMS and push settings it finds, encrypted. Your old SMS modem settings become a custom SMS endpoint. Nothing leaves this gateway, and only setting <em>names</em> are shown afterwards.</p>
+  <input type="file" id="envfile" accept=".env,text/plain" style="max-width:340px" />
+  <label for="envtext">…or paste it here</label>
+  <textarea id="envtext" rows="5" spellcheck="false" autocomplete="off" placeholder="MAILJET_API_KEY=…" style="width:100%;font-family:ui-monospace,monospace;font-size:13px"></textarea>
+  <label for="ipw">Your password (to confirm)</label>
+  <input id="ipw" type="password" autocomplete="current-password" style="max-width:300px" />
+  <div class="row"><button class="btn" id="doImport">Import settings</button></div>
+  <div id="iout"></div>
+</div>
+
+<div class="card">
   <h2>Database</h2>
   <div class="kv">
     <div class="k">Storage</div><div>{{ 'MongoDB Atlas (remote)' if backend == 'atlas' else 'Local (SQLite, on this computer)' }}</div>
@@ -35,6 +47,24 @@
     var b = ev.target, out = document.getElementById("gout"); b.disabled = true;
     window.MG.post("/gateway/settings/general", { store_content: document.getElementById("storeContent").checked, allow_signups: document.getElementById("allowSignups").checked, password: document.getElementById("gpw").value })
       .then(function () { document.getElementById("gpw").value = ""; window.MG.say(out, "Saved.", "ok"); })
+      .catch(function (e) { window.MG.say(out, e.message, "err"); })
+      .then(function () { b.disabled = false; });
+  };
+
+  document.getElementById("envfile").onchange = function (e) {
+    var f = e.target.files[0]; if (!f) return;
+    var r = new FileReader(); r.onload = function () { document.getElementById("envtext").value = r.result; }; r.readAsText(f);
+  };
+  document.getElementById("doImport").onclick = function (ev) {
+    var b = ev.target, out = document.getElementById("iout"); b.disabled = true;
+    window.MG.post("/gateway/settings/import", { text: document.getElementById("envtext").value, password: document.getElementById("ipw").value })
+      .then(function (r) {
+        document.getElementById("ipw").value = ""; document.getElementById("envtext").value = ""; document.getElementById("envfile").value = "";
+        var c = Object.keys(r.connected || {}).map(function (ch) { return ch + ": " + r.connected[ch].join(", "); });
+        window.MG.say(out, (c.length ? "Imported. Connected " + c.join("; ") + "." : "Nothing recognizable was found in that file.") +
+          (r.skipped && r.skipped.length ? " Skipped " + r.skipped.length + " other setting(s) that the gateway manages itself." : "") +
+          " Review each channel under Channels, and use Send a test.", c.length ? "ok" : "err");
+      })
       .catch(function (e) { window.MG.say(out, e.message, "err"); })
       .then(function () { b.disabled = false; });
   };

@@ -7,11 +7,11 @@
   {% if closed %}
     <p class="sub">Sign-ups are closed.</p>
     <div class="card">
-      <p style="margin-top:0">This gateway isn't accepting new accounts. Ask its owner to turn sign-ups on, or to share access another way.</p>
+      <p style="margin-top:0">This gateway isn't accepting new accounts. Ask its administrator to turn sign-ups on, or to share access another way.</p>
       <a class="btn" href="/gateway/login">Back to log in</a>
     </div>
   {% else %}
-    <p class="sub">{{ 'Create the owner account. It can change settings later.' if first_account else 'Create your account.' }}</p>
+    <p class="sub">Create your account.</p>
     <div class="card">
       {% if error %}<div class="msg err" style="margin-top:0">{{ error }}</div>{% endif %}
       <form method="post" action="/gateway/register" autocomplete="off">
