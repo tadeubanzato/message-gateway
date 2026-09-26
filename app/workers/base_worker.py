@@ -15,6 +15,7 @@ import pika
 
 from app.broker import EXCHANGE, EXCHANGE_TYPE, QUEUE_NAMES, RABBITMQ_URL, ROUTING_KEY, declare_topology
 from app.db import get_repository
+from app.services import message_log
 
 MAX_ATTEMPTS = 3
 BACKOFF_BASE_SECONDS = 2
@@ -32,8 +33,6 @@ def run_worker(channel_name: str, deliver_fn: Callable[[dict], object], label: s
     all share this shape).
     """
     queue_name = QUEUE_NAMES[channel_name]
-    repo = get_repository()
-
     print(f"[{label}] starting... queue={queue_name}")
 
     while True:
@@ -66,7 +65,7 @@ def run_worker(channel_name: str, deliver_fn: Callable[[dict], object], label: s
                     return
 
                 try:
-                    repo.insert_attempt({
+                    get_repository().insert_attempt({
                         "message_id": message_id,
                         "provider": getattr(result, "provider", None),
                         "ok": bool(result.ok),
@@ -77,13 +76,16 @@ def run_worker(channel_name: str, deliver_fn: Callable[[dict], object], label: s
                     })
                 except Exception as e:
                     print(f"[{label}] warning: failed to persist attempt record: {e!r}")
+                message_log.record_attempt(
+                    message_id, attempt=attempt_count,
+                    provider=getattr(result, "provider", None),
+                    provider_message_id=getattr(result, "provider_message_id", None),
+                    error=getattr(result, "error", None),
+                )
 
                 if result.ok:
                     print(f"[{label}] ✅ sent message_id={message_id} provider_id={getattr(result, 'provider_message_id', None)}")
-                    try:
-                        repo.update_message_status(message_id, "delivered")
-                    except Exception:
-                        pass
+                    message_log.record_final(message_id, "delivered")
                     channel.basic_ack(delivery_tag=method.delivery_tag)
                     return
 
@@ -106,10 +108,7 @@ def run_worker(channel_name: str, deliver_fn: Callable[[dict], object], label: s
                     return
 
                 print(f"[{label}] ❌ permanent failure message_id={message_id}: {getattr(result, 'error', None)}")
-                try:
-                    repo.update_message_status(message_id, "failed")
-                except Exception:
-                    pass
+                message_log.record_final(message_id, "failed")
                 channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
             ch.basic_consume(queue=queue_name, on_message_callback=on_message, auto_ack=False)

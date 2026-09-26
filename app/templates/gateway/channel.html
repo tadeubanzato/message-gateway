@@ -1,0 +1,90 @@
+{% extends "gateway/base.html" %}
+{% block title %}Message Gateway - {{ ch.label }}{% endblock %}
+{% block content %}
+<p class="muted"><a href="/gateway">← Home</a></p>
+<div class="row between"><h1 style="margin:0">{{ ch.label }}</h1><span class="badge {{ ch.state }}" id="chBadge"></span></div>
+<p class="sub" id="chSummary"></p>
+
+<div class="card">
+  <h3>Choosing a provider per message</h3>
+  <p class="muted" style="margin:0 0 8px">Messages use the default provider unless the API call names another connected one:</p>
+  <pre style="margin:0"><code>{"channel": "{{ ch.channel }}", ... , "provider": "<span id="exProv">{{ (ch.connected | map(attribute='name') | list)[0] if ch.connected else 'provider-name' }}</span>"}</code></pre>
+</div>
+
+<div id="providers"></div>
+{% endblock %}
+{% block scripts %}
+<script id="data" type="application/json">{{ payload | tojson }}</script>
+<script>
+  const D = JSON.parse(document.getElementById("data").textContent);
+  const CH = D.channel, SPEC = D.spec, LABEL = D.label;
+  const $ = (s, r = document) => r.querySelector(s);
+  const { post, say } = window.MG;
+  const STATE = { ready: "Ready", needs_attention: "Needs attention", not_set_up: "Not set up" };
+  let status = D.status;
+
+  function header() {
+    $("#chBadge").className = "badge " + status.state; $("#chBadge").textContent = STATE[status.state];
+    $("#chSummary").textContent = status.state === "not_set_up" ? "No provider connected yet. Add one below to start sending."
+      : status.state === "ready" ? "Messages go through " + status.default_label + " unless the call picks another connected provider."
+      : "The default provider (" + status.default_label + ") isn't connected. Connect it or make another provider the default.";
+    if (status.connected.length) $("#exProv").textContent = status.connected[0].name;
+  }
+
+  function card(p) {
+    const spec = SPEC.providers[p.name];
+    const el = document.createElement("div"); el.className = "pcard" + (p.is_default && p.connected ? " is-default" : ""); el.id = p.name;
+    el.innerHTML = `<div class="row between"><h3>${spec.label}</h3><span class="row" style="gap:6px" data-badges></span></div>
+      <p class="help" style="margin:6px 0 0">${spec.help}</p>
+      <div data-fields></div>
+      <label>Your password (to confirm changes)</label><input type="password" data-pw autocomplete="current-password" style="max-width:300px" />
+      <div class="actions" data-actions></div><div data-out></div>`;
+    const saved = new Set(p.fields.filter(f => f.set).map(f => f.name));
+    const fields = $("[data-fields]", el);
+    for (const f of spec.fields) {
+      const l = document.createElement("label"); l.textContent = f.label + (f.optional ? " (optional)" : "");
+      const i = document.createElement("input"); i.dataset.name = f.name; i.autocomplete = "off"; i.type = f.secret ? "password" : "text";
+      if (saved.has(f.name)) i.placeholder = f.secret ? "•••••••• saved. Type to replace" : "Saved. Type to replace";
+      fields.append(l, i);
+    }
+    const badges = $("[data-badges]", el);
+    badges.innerHTML = (p.is_default && p.connected ? '<span class="badge default">Default</span>' : "") + (p.connected ? '<span class="badge connected">Connected</span>' : '<span class="badge not_set_up">Not connected</span>');
+    const actions = $("[data-actions]", el), out = $("[data-out]", el);
+    const btn = (text, cls, fn) => { const b = document.createElement("button"); b.className = "btn " + cls; b.textContent = text; b.onclick = () => fn(b); actions.appendChild(b); return b; };
+    const pw = () => $("[data-pw]", el).value;
+    const run = async (b, path, body, okMsg) => {
+      const label = b.textContent; b.disabled = true;
+      try { const r = await post("/gateway/channels/" + CH + path, { provider: p.name, password: pw(), ...body });
+        if (r.status) status = r.status; return r;
+      } catch (e) { say(out, e.message, "err"); return null; } finally { b.disabled = false; b.textContent = label; }
+    };
+
+    btn(p.connected ? "Save & check" : "Connect", "", async (b) => {
+      const values = {}; fields.querySelectorAll("input").forEach(i => { if (i.value.trim()) values[i.dataset.name] = i.value.trim(); });
+      b.textContent = "Checking…";
+      const r = await run(b, "/save", { values }); if (!r) return;
+      if (r.ok) { render(); const c = document.getElementById(p.name); say($("[data-out]", c), "Saved. The provider accepted these credentials.", "ok"); }
+      else { header(); say(out, r.error || "The provider rejected these credentials.", "err"); render(p.name, r.error); }
+    });
+    if (p.connected) {
+      btn("Send test", "ghost", () => window.MG.openTest(CH, LABEL, status.connected, status.default, p.name));
+      if (!p.is_default) btn("Make default", "ghost", async (b) => { const r = await run(b, "/default", {}); if (r) { if (r.ok) render(); else say(out, r.error, "err"); } });
+      let armed = false;
+      btn("Remove", "danger", async (b) => {
+        if (!armed) { armed = true; b.textContent = "Click again to confirm"; setTimeout(() => { armed = false; b.textContent = "Remove"; }, 4000); return; }
+        const r = await run(b, "/remove", {}); if (r) { if (r.ok) render(); else say(out, r.error, "err"); }
+      });
+    }
+    return el;
+  }
+
+  function render(keepMsgFor, msg) {
+    header();
+    const box = $("#providers"); box.innerHTML = "";
+    status.providers.forEach(p => box.appendChild(card(p)));
+    if (keepMsgFor && msg) say($("[data-out]", document.getElementById(keepMsgFor)), msg, "err");
+  }
+  render();
+  if (location.hash) { const t = document.querySelector(location.hash); if (t) t.scrollIntoView(); }
+</script>
+{% endblock %}

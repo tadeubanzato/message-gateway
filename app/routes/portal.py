@@ -24,12 +24,13 @@ from starlette.templating import Jinja2Templates
 
 from app.db import get_repository
 from app.db.base import DuplicateEmailError, DuplicateUserKeyError
+from app.services import access, message_log
 from app.services.auth_passwords import hash_password, verify_password
 from app.services.auth_tokens import generate_raw_token, hmac_token_hash_hex, new_user_key, token_last4
 
 router = APIRouter()
 
-TEMPLATES_DIR = os.environ.get("TEMPLATES_DIR", "/app/templates").strip() or "/app/templates"
+TEMPLATES_DIR = os.environ.get("TEMPLATES_DIR", "/app/app/templates").strip() or "/app/app/templates"
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 SESSION_COOKIE_NAME = (os.environ.get("PORTAL_SESSION_COOKIE", "portal_sid") or "portal_sid").strip()
@@ -41,6 +42,24 @@ DEFAULT_TOKEN_APP = "default"
 
 def _repo():
     return get_repository()
+
+
+def page_ctx(request: Request, account: dict[str, Any], active: str = "", **extra: Any) -> dict[str, Any]:
+    """Variables every logged-in page needs for the shared layout/navbar."""
+    return {
+        "request": request, "active": active,
+        "user_name": account.get("name", ""), "user_email": account.get("email", ""),
+        "user_key": account.get("user_key", ""), "is_owner": access.is_owner(account),
+        "base_url": str(request.base_url).rstrip("/"),
+        **extra,
+    }
+
+
+def _login_ctx(request: Request, **extra: Any) -> dict[str, Any]:
+    return {
+        "request": request, "test_user_key_set": bool(TEST_USER_KEY), "test_user_key": TEST_USER_KEY,
+        "signups_open": access.signups_open(), **extra,
+    }
 
 
 def _utcnow() -> datetime:
@@ -159,10 +178,9 @@ def _get_active_apps(account: dict[str, Any]) -> Dict[str, dict[str, Any]]:
 # ---------------------------------------------------------------------
 @router.get("/gateway/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    return templates.TemplateResponse(
-        "gateway/login.html",
-        {"request": request, "test_user_key_set": bool(TEST_USER_KEY), "test_user_key": TEST_USER_KEY},
-    )
+    if not access.has_accounts():
+        return _redirect("/gateway/register")  # fresh install: create the owner account first
+    return templates.TemplateResponse("gateway/login.html", _login_ctx(request))
 
 
 @router.post("/gateway/login")
@@ -173,23 +191,17 @@ async def login_submit(request: Request):
 
     if not email or "@" not in email:
         return templates.TemplateResponse(
-            "gateway/login.html",
-            {"request": request, "error": "Valid email is required.", "email": email,
-             "test_user_key_set": bool(TEST_USER_KEY), "test_user_key": TEST_USER_KEY},
-            status_code=400,
+            "gateway/login.html", _login_ctx(request, error="Valid email is required.", email=email), status_code=400,
         )
 
     account = _repo().find_account_by_email(email)
     if not account or not verify_password(password, account.get("password_hash", "")):
         return templates.TemplateResponse(
-            "gateway/login.html",
-            {"request": request, "error": "Invalid email or password.", "email": email,
-             "test_user_key_set": bool(TEST_USER_KEY), "test_user_key": TEST_USER_KEY},
-            status_code=401,
+            "gateway/login.html", _login_ctx(request, error="Invalid email or password.", email=email), status_code=401,
         )
 
     sid = _create_session(str(account["_id"]))
-    resp = _redirect("/gateway/account")
+    resp = _redirect("/gateway")
     _set_session_cookie(resp, sid)
     return resp
 
@@ -211,7 +223,7 @@ def login_as_test_user(request: Request):
             status_code=404,
         )
     sid = _create_session(str(account["_id"]))
-    resp = _redirect("/gateway/account")
+    resp = _redirect("/gateway")
     _set_session_cookie(resp, sid)
     return resp
 
@@ -231,11 +243,18 @@ def logout(request: Request):
 # ---------------------------------------------------------------------
 @router.get("/gateway/register", response_class=HTMLResponse)
 def register_page(request: Request):
-    return templates.TemplateResponse("gateway/register.html", {"request": request})
+    if not access.signups_open():
+        return templates.TemplateResponse("gateway/register.html", {"request": request, "closed": True}, status_code=403)
+    return templates.TemplateResponse(
+        "gateway/register.html", {"request": request, "first_account": not access.has_accounts()}
+    )
 
 
 @router.post("/gateway/register", response_class=HTMLResponse)
 async def register_submit(request: Request):
+    if not access.signups_open():
+        return templates.TemplateResponse("gateway/register.html", {"request": request, "closed": True}, status_code=403)
+    first_account = not access.has_accounts()
     form = await request.form()
     name = str(form.get("name") or "").strip()
     email = str(form.get("email") or "").strip().lower()
@@ -267,16 +286,19 @@ async def register_submit(request: Request):
         }
         try:
             account_id = repo.insert_account(doc)
+            if first_account:
+                access.claim_owner(account_id)
             app = DEFAULT_TOKEN_APP
             raw = generate_raw_token()
             repo.push_token(account_id, _create_token_doc(raw, app))
 
             sid = _create_session(account_id)
+            new_account = {**doc, "_id": account_id}
             resp = templates.TemplateResponse(
                 "gateway/token_once.html",
-                {"request": request,
-                 "warning": "Copy this token now for your default application. You will not be able to see it again.",
-                 "user_key": user_key, "raw_token": raw},
+                page_ctx(request, new_account, "keys",
+                         warning="Here are the credentials for your first key, named 'default'.",
+                         raw_token=raw),
             )
             _set_session_cookie(resp, sid)
             return resp
@@ -299,41 +321,6 @@ async def register_submit(request: Request):
     )
 
 
-# ---------------------------------------------------------------------
-# ACCOUNT PAGE (protected)
-# ---------------------------------------------------------------------
-@router.get("/gateway/account", response_class=HTMLResponse)
-def account_page(request: Request):
-    redirect, account = _require_account_or_redirect(request)
-    if redirect:
-        return redirect
-    assert account is not None
-
-    selected_app_raw = request.query_params.get("app")
-    selected_app = _normalize_app(selected_app_raw) if selected_app_raw is not None else None
-    active_apps = _get_active_apps(account)
-    if selected_app not in active_apps:
-        selected_app = None
-    active_token = active_apps.get(selected_app) if selected_app else None
-
-    active_apps_list: List[dict[str, Any]] = []
-    for app, t in sorted(active_apps.items(), key=lambda kv: kv[0]):
-        active_apps_list.append({"app": app, "last4": (t.get("last4") or ""), "created_at": _iso(t.get("created_at"))})
-
-    return templates.TemplateResponse(
-        "gateway/account.html",
-        {
-            "request": request, "name": account.get("name", ""), "email": account.get("email", ""),
-            "user_key": account.get("user_key", ""), "now_iso": _utcnow().isoformat(),
-            "active_apps": active_apps_list, "selected_app": selected_app,
-            "active_token": (
-                {"created_at": _iso(active_token.get("created_at")), "last4": active_token.get("last4", "") or ""}
-                if active_token else None
-            ),
-        },
-    )
-
-
 @router.post("/gateway/services/message-gateway/tokens")
 async def create_or_rotate_token(request: Request):
     redirect, account = _require_account_or_redirect(request)
@@ -352,8 +339,7 @@ async def create_or_rotate_token(request: Request):
 
     return templates.TemplateResponse(
         "gateway/token_once.html",
-        {"request": request, "warning": f"Copy this token now for application '{app}'. You will not be able to see it again.",
-         "user_key": account.get("user_key", ""), "raw_token": raw},
+        page_ctx(request, account, "keys", warning=f"Here is the new token for the key named '{app}'.", raw_token=raw),
     )
 
 
@@ -369,4 +355,4 @@ async def revoke_application(request: Request):
     account_id = str(account["_id"])
     _repo().revoke_tokens(account_id, lambda t: _normalize_app(t.get("app") or DEFAULT_TOKEN_APP) == app)
 
-    return _redirect("/gateway/account")
+    return _redirect("/gateway/keys")

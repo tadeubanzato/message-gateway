@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Set up Message Gateway</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+<div class="page">
+  <h1>Set up Message Gateway</h1>
+  <p class="sub">Three quick steps. Your credentials are encrypted and stored locally. Nothing to edit by hand.</p>
+
+  <div class="steps" id="steps">
+    <span id="s1" class="on">1 · Database</span>
+    <span id="s2">2 · Providers</span>
+    <span id="s3">3 · Finish</span>
+  </div>
+
+  <!-- Step 1 -->
+  <section id="step1">
+    <div class="card">
+      <h2>Where should the gateway keep its data?</h2>
+      <label class="opt"><input type="radio" name="backend" value="sqlite" checked />
+        <span><b>On this computer (recommended)</b><small>Works immediately. No accounts needed.</small></span></label>
+      <label class="opt"><input type="radio" name="backend" value="atlas" />
+        <span><b>MongoDB Atlas (remote)</b><small>Managed cloud database. Needs your Atlas connection string.</small></span></label>
+      <div id="atlasFields" class="hidden">
+        <label for="uri">Connection string</label>
+        <input id="uri" type="password" autocomplete="off" placeholder="mongodb+srv://user:password@cluster.mongodb.net/" />
+        <label for="dbname">Database name</label>
+        <input id="dbname" value="relay_gateway" autocomplete="off" />
+        <p class="help">In Atlas, allow your IP under Network Access and use a user with read/write access.</p>
+      </div>
+      <div class="row"><button class="btn" id="dbNext">Continue</button></div>
+      <div id="dbMsg"></div>
+    </div>
+  </section>
+
+  <!-- Step 2 -->
+  <section id="step2" class="hidden">
+    <p class="sub" style="margin-bottom:6px">Set up the channels you want. You can skip any of them.</p>
+    <div id="channels"></div>
+    <div class="row"><button class="btn" id="toFinish">Continue</button></div>
+  </section>
+
+  <!-- Step 3 -->
+  <section id="step3" class="hidden">
+    <div class="card">
+      <h2>All set</h2>
+      <p>Next, create your account. It gives you a key and token for sending messages.</p>
+      <label class="opt"><input type="checkbox" id="storeContent" checked />
+        <span><b>Keep a full message log</b><small>Saves the subject and text of each message (encrypted) along with time, recipient and delivery status, so you can review them later. Uncheck to log only the metadata.</small></span></label>
+      <button class="btn" id="finish">Finish and create my account</button>
+      <div id="finMsg"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const api = async (path, body) => {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!res.ok) { const t = await res.text(); throw new Error(res.status === 403 ? "Setup is already complete." : t); }
+  return res.json();
+};
+const show = (el, text, kind) => { el.innerHTML = ""; const d = document.createElement("div"); d.className = "msg " + kind; d.textContent = text; el.appendChild(d); };
+const CH = { email: "Email", sms: "SMS", push: "Push notifications" };
+let state = null;
+
+function step(n) {
+  for (const i of [1, 2, 3]) {
+    $("#step" + i).classList.toggle("hidden", i !== n);
+    $("#s" + i).className = i < n ? "done" : i === n ? "on" : "";
+  }
+}
+
+document.querySelectorAll('input[name="backend"]').forEach(r => r.addEventListener("change", () => {
+  $("#atlasFields").classList.toggle("hidden", document.querySelector('input[name="backend"]:checked').value !== "atlas");
+}));
+
+$("#dbNext").onclick = async () => {
+  const backend = document.querySelector('input[name="backend"]:checked').value;
+  const btn = $("#dbNext"); btn.disabled = true; btn.textContent = "Connecting…";
+  try {
+    const r = await api("/setup/database", { backend, mongodb_uri: $("#uri").value, mongodb_db: $("#dbname").value });
+    if (!r.ok) { show($("#dbMsg"), r.error || "Could not connect.", "err"); return; }
+    if (r.already_set_up) { window.location = "/gateway/login"; return; }
+    await loadProviders(); step(2);
+  } catch (e) { show($("#dbMsg"), e.message, "err"); }
+  finally { btn.disabled = false; btn.textContent = "Continue"; }
+};
+
+async function loadProviders() {
+  state = await api("/setup/state");
+  const box = $("#channels"); box.innerHTML = "";
+  for (const [ch, spec] of Object.entries(state.catalog)) box.appendChild(channelCard(ch, spec));
+}
+
+function channelCard(ch, spec) {
+  const card = document.createElement("div"); card.className = "card";
+  const names = Object.keys(spec.providers);
+  card.innerHTML = `<h2>${CH[ch]}<span class="tag hidden"></span></h2>
+    <label>Provider</label><select></select>
+    <div class="fields"></div>
+    <div class="row"><button class="btn save">Save &amp; check</button></div><div class="out"></div>`;
+  const sel = $("select", card), fields = $(".fields", card), out = $(".out", card);
+  sel.innerHTML = `<option value="">Skip this channel</option>` + names.map(n => `<option value="${n}">${spec.providers[n].label}</option>`).join("");
+  if (spec.selected && spec.providers[spec.selected]) sel.value = spec.selected;
+  $(".save", card).classList.toggle("hidden", !sel.value);
+
+  const render = () => {
+    fields.innerHTML = ""; out.innerHTML = "";
+    $(".save", card).classList.toggle("hidden", !sel.value);
+    const p = spec.providers[sel.value]; if (!p) return;
+    const help = document.createElement("p"); help.className = "help"; help.textContent = p.help; fields.appendChild(help);
+    for (const f of p.fields) {
+      const l = document.createElement("label"); l.textContent = f.label + (f.optional ? " (optional)" : "");
+      const i = document.createElement("input"); i.dataset.name = f.name; i.autocomplete = "off";
+      i.type = f.secret ? "password" : "text";
+      if (state.configured_settings.includes(f.name)) i.placeholder = "Saved. Leave blank to keep";
+      fields.append(l, i);
+    }
+  };
+  sel.onchange = render; render();
+
+  $(".save", card).onclick = async () => {
+    const values = {}; fields.querySelectorAll("input").forEach(i => { if (i.value.trim()) values[i.dataset.name] = i.value.trim(); });
+    const btn = $(".save", card); btn.disabled = true; btn.textContent = "Checking…";
+    try {
+      const r = await api("/setup/provider", { channel: ch, provider: sel.value, values });
+      if (r.ok) {
+        show(out, "Connected. Credentials verified with the provider.", "ok");
+        $(".tag", card).textContent = "✓ ready"; $(".tag", card).classList.remove("hidden");
+        addTest(card, out, ch);
+      } else show(out, r.error || "The provider rejected these credentials.", "err");
+    } catch (e) { show(out, e.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "Save & check"; }
+  };
+  return card;
+}
+
+function addTest(card, out, ch) {
+  if ($(".testrow", card)) return;
+  const row = document.createElement("div"); row.className = "row testrow";
+  const needsTo = ch !== "push";
+  row.innerHTML = (needsTo ? `<input class="to" placeholder="${ch === "email" ? "you@example.com" : "+15551234567"}" style="max-width:260px" />` : "") + `<button class="btn ghost">Send a test</button>`;
+  const res = document.createElement("div");
+  card.append(row, res);
+  $("button", row).onclick = async () => {
+    const b = $("button", row); b.disabled = true;
+    try {
+      const r = await api("/setup/test", { channel: ch, to: needsTo ? $(".to", row).value : null });
+      show(res, r.ok ? "Test sent. Check your device or inbox." : (r.error || "Send failed."), r.ok ? "ok" : "err");
+    } catch (e) { show(res, e.message, "err"); }
+    finally { b.disabled = false; }
+  };
+}
+
+$("#toFinish").onclick = () => step(3);
+$("#finish").onclick = async () => {
+  try { const r = await api("/setup/finish", { store_content: $("#storeContent").checked }); window.location = r.next; }
+  catch (e) { show($("#finMsg"), e.message, "err"); }
+};
+</script>
+</body>
+</html>

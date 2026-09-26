@@ -55,6 +55,11 @@ CREATE TABLE IF NOT EXISTS attempts (
     doc TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    name TEXT PRIMARY KEY,
+    doc TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_attempts_message_id ON attempts(message_id);
 """
@@ -146,6 +151,24 @@ class SqliteRepository(Repository):
             raise
         return account_id
 
+    def count_accounts(self) -> int:
+        return int(self._conn().execute("SELECT COUNT(*) FROM accounts").fetchone()[0])
+
+    def oldest_account_id(self) -> Optional[str]:
+        row = self._conn().execute("SELECT id FROM accounts ORDER BY rowid ASC LIMIT 1").fetchone()
+        return row[0] if row else None
+
+    def set_password_hash(self, account_id: str, password_hash: str) -> None:
+        row = self._conn().execute("SELECT doc FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if not row:
+            return
+        doc = json.loads(row[0])
+        doc["password_hash"] = password_hash
+        self._conn().execute(
+            "UPDATE accounts SET doc = ? WHERE id = ?", (json.dumps(doc, default=_json_default), account_id)
+        )
+        self._conn().commit()
+
     def push_token(self, account_id: str, token_doc: dict[str, Any]) -> None:
         acct = self.find_account_by_id(account_id)
         if not acct:
@@ -214,7 +237,8 @@ class SqliteRepository(Repository):
         self._conn().commit()
 
     def list_messages(
-        self, channel: Optional[str], status: Optional[str], limit: int
+        self, channel: Optional[str], status: Optional[str], limit: int,
+        account_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         query = "SELECT doc FROM messages WHERE 1=1"
         params: list[Any] = []
@@ -224,10 +248,33 @@ class SqliteRepository(Repository):
         if status:
             query += " AND status = ?"
             params.append(status)
-        query += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
-        rows = self._conn().execute(query, params).fetchall()
-        return [json.loads(r[0]) for r in rows]
+        rows = self._conn().execute(
+            query + " ORDER BY created_at DESC", params
+        ).fetchall()
+        docs = [json.loads(r[0]) for r in rows]
+        if account_id is not None:
+            docs = [d for d in docs if d.get("account_id") == account_id]
+        return docs[:limit]
+
+    def get_message(self, message_id: str) -> Optional[dict[str, Any]]:
+        row = self._conn().execute(
+            "SELECT doc FROM messages WHERE message_id = ?", (message_id,)
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def update_message_fields(self, message_id: str, fields: dict[str, Any]) -> None:
+        row = self._conn().execute(
+            "SELECT doc FROM messages WHERE message_id = ?", (message_id,)
+        ).fetchone()
+        if not row:
+            return
+        doc = json.loads(row[0])
+        doc.update(fields)
+        self._conn().execute(
+            "UPDATE messages SET status = ?, doc = ? WHERE message_id = ?",
+            (doc.get("status", "queued"), json.dumps(doc, default=_json_default), message_id),
+        )
+        self._conn().commit()
 
     def update_message_status(self, message_id: str, status: str) -> None:
         row = self._conn().execute(
@@ -274,6 +321,24 @@ class SqliteRepository(Repository):
         self._conn().execute(f"DELETE FROM messages WHERE message_id IN ({placeholders})", old_ids)
         self._conn().commit()
         return len(old_ids)
+
+    # ---- settings ----
+    def list_settings(self) -> dict[str, dict[str, Any]]:
+        rows = self._conn().execute("SELECT name, doc FROM settings").fetchall()
+        return {r[0]: json.loads(r[1]) for r in rows}
+
+    def set_setting(self, name: str, value_enc: str) -> None:
+        doc = {"value_enc": value_enc, "updated_at": _now()}
+        self._conn().execute(
+            "INSERT INTO settings (name, doc) VALUES (?, ?) "
+            "ON CONFLICT(name) DO UPDATE SET doc = excluded.doc",
+            (name, json.dumps(doc)),
+        )
+        self._conn().commit()
+
+    def delete_setting(self, name: str) -> None:
+        self._conn().execute("DELETE FROM settings WHERE name = ?", (name,))
+        self._conn().commit()
 
     # ---- lifecycle ----
     def ensure_indexes(self) -> None:

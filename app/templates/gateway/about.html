@@ -1,0 +1,43 @@
+{% extends "gateway/base.html" %}
+{% block title %}Message Gateway - About{% endblock %}
+{% block content %}
+<h1>About Message Gateway</h1>
+<p class="sub">A self-hosted gateway for sending email, SMS and push notifications through one API.</p>
+
+<div class="card">
+  <h2>This gateway</h2>
+  <div class="kv">
+    <div class="k">Version</div><div>{{ version }}</div>
+    <div class="k">Address</div><div><code>{{ base_url }}</code></div>
+    <div class="k">Database</div><div>{{ 'MongoDB Atlas (remote)' if backend == 'atlas' else 'Local (SQLite)' }} <span class="badge {{ 'ready' if db_ok else 'failed' }}" style="margin-left:6px">{{ 'Connected' if db_ok else 'Not reachable' }}</span></div>
+    <div class="k">Message log</div><div>Kept for 90 days, content {{ 'stored (encrypted)' if store_content else 'not stored' }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>How it works</h2>
+  <p style="margin-top:0">Your programs call one API. The gateway puts each message in a queue, a background worker delivers it through the provider you connected (for example Mailjet, Twilio or Pushover), retries if the provider has a temporary problem, and records the result in the <a href="/gateway/messages">message log</a>.</p>
+  <ul style="margin:0;padding-left:20px">
+    <li>Connect providers in <a href="/gateway/settings">Settings</a> (owner only).</li>
+    <li>Create keys for your programs in <a href="/gateway/keys">API keys</a>.</li>
+    <li>Messages that keep failing are set aside instead of being lost.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h2>Developers</h2>
+  <div class="kv">
+    <div class="k">Send a message</div><div><code>POST {{ base_url }}/v1/messages</code></div>
+    <div class="k">Read your log</div><div><code>GET {{ base_url }}/v1/messages</code></div>
+    <div class="k">Health check</div><div><code>GET {{ base_url }}/health</code></div>
+    <div class="k">API reference</div><div><a href="/scalar">Interactive docs</a> · <a href="/docs">Swagger</a> · <a href="/openapi.json">OpenAPI</a></div>
+    <div class="k">AI agents (MCP)</div><div><code>{{ mcp_url }}</code></div>
+  </div>
+  <p class="muted" style="margin:10px 0 0">Authenticate with your <code>X-User-Key</code> and <code>X-API-Token</code> headers. See <a href="/gateway/keys">API keys</a>.</p>
+</div>
+
+<div class="card">
+  <h2>Project</h2>
+  <p style="margin:0">Open source, MIT licensed. Source and issues: <a href="https://github.com/tadeubanzato/message-gateway" target="_blank" rel="noopener">github.com/tadeubanzato/message-gateway</a></p>
+</div>
+{% endblock %}

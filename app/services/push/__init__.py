@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+from app.services.env import get_env
 
 from app.services.push.base import PushProvider
 
@@ -10,7 +10,7 @@ PROVIDER_REGISTRY = {
     "ntfy": "app.services.push.ntfy:NtfyProvider",
 }
 
-_active: PushProvider | None = None
+_cache: dict[str, PushProvider] = {}
 
 
 def _load(path: str) -> PushProvider:
@@ -21,14 +21,24 @@ def _load(path: str) -> PushProvider:
     return getattr(mod, cls_name)()
 
 
-def get_push_provider() -> PushProvider:
-    global _active
-    if _active is not None:
-        return _active
-    name = os.environ.get("PUSH_PROVIDER", "pushover").strip().lower() or "pushover"
+def default_provider_name() -> str:
+    """The channel's default provider (what a message uses when it names none)."""
+    return (get_env("PUSH_PROVIDER", "pushover") or "pushover").strip().lower() or "pushover"
+
+
+def get_push_provider(name: str | None = None) -> PushProvider:
+    """Provider instance by name (default: the channel default). Resolved on every
+    call, so changes made in Settings apply without a restart."""
+    name = (name or default_provider_name()).strip().lower()
+    if name not in PROVIDER_REGISTRY:
+        raise SystemExit(f"Unsupported push provider {name!r}. Options: {list(PROVIDER_REGISTRY)}")
+    if name not in _cache:
+        _cache[name] = _load(PROVIDER_REGISTRY[name])
+    return _cache[name]
     if name not in PROVIDER_REGISTRY:
         raise SystemExit(f"Unsupported PUSH_PROVIDER={name!r}. Options: {list(PROVIDER_REGISTRY)}")
     _active = _load(PROVIDER_REGISTRY[name])
+    _active_name = name
     return _active
 
 

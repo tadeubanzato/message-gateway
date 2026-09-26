@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}Message Gateway{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css" />
+  {% block head %}{% endblock %}
+</head>
+<body>
+{% if not bare %}
+<header class="nav">
+  <div class="nav-in">
+    <a class="brand" href="/gateway">Message Gateway</a>
+    <nav class="links" id="links">
+      <a href="/gateway" class="{{ 'on' if active == 'home' }}">Home</a>
+      {% if is_owner %}
+      <details class="dd {{ 'on' if active == 'channels' }}">
+        <summary>Channels ▾</summary>
+        <div class="menu">
+          <a href="/gateway/channels/email">Email</a>
+          <a href="/gateway/channels/sms">SMS</a>
+          <a href="/gateway/channels/push">Push</a>
+        </div>
+      </details>
+      {% endif %}
+      <a href="/gateway/messages" class="{{ 'on' if active == 'messages' }}">Message log</a>
+      <a href="/gateway/keys" class="{{ 'on' if active == 'keys' }}">API keys</a>
+      <a href="/gateway/about" class="{{ 'on' if active == 'about' }}">About</a>
+    </nav>
+    <details class="user">
+      <summary>{{ user_name or 'Account' }} ▾</summary>
+      <div class="menu">
+        <div class="who"><b>{{ user_name }}</b><div class="muted">{{ user_email }}</div></div>
+        <a href="/gateway/account">Account</a>
+        {% if is_owner %}<a href="/gateway/settings">Settings</a>{% endif %}
+        <form method="post" action="/gateway/logout"><button type="submit">Log out</button></form>
+      </div>
+    </details>
+    <button class="burger" aria-label="Menu" onclick="document.getElementById('links').classList.toggle('open')">☰</button>
+  </div>
+</header>
+{% endif %}
+{% if not bare and is_owner %}
+<dialog id="testDlg">
+  <h3 data-title>Send a test</h3>
+  <div data-provider-row><label>Provider</label><select data-provider></select></div>
+  <div data-to-row><label>Send to</label><input data-to autocomplete="off" /></div>
+  <p class="muted" data-hint></p>
+  <div data-out></div>
+  <div class="row" style="justify-content:flex-end;margin-top:14px">
+    <button class="btn ghost" type="button" onclick="document.getElementById('testDlg').close()">Close</button>
+    <button class="btn" type="button" data-send>Send test</button>
+  </div>
+</dialog>
+{% endif %}
+{% block body %}<main class="wrap">{% block content %}{% endblock %}</main>{% endblock %}
+<script>
+  function copyText(text, btn) {
+    navigator.clipboard.writeText(text).then(function () {
+      var old = btn.textContent; btn.textContent = "Copied"; setTimeout(function () { btn.textContent = old; }, 1400);
+    });
+  }
+  document.addEventListener("click", function (e) {
+    document.querySelectorAll("details.user[open], details.dd[open]").forEach(function (d) {
+      if (!d.contains(e.target)) d.removeAttribute("open");
+    });
+  });
+</script>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,69 @@
+{% extends "gateway/base.html" %}
+{% block title %}Message Gateway - API keys{% endblock %}
+{% block content %}
+<h1>API keys</h1>
+<p class="sub">Programs use these to send messages through your gateway.</p>
+
+<div class="card">
+  <h2>Your user key</h2>
+  <div class="row"><pre style="margin:0;flex:1"><code>{{ user_key }}</code></pre><button class="btn ghost sm" onclick="copyText('{{ user_key }}', this)">Copy</button></div>
+  <p class="muted" style="margin:8px 0 0">Sent as the <code>X-User-Key</code> header. Each key below has its own secret token, sent as <code>X-API-Token</code>.</p>
+</div>
+
+<div class="card">
+  <h2>Keys</h2>
+  {% if active_apps %}
+  <div class="scroll"><table>
+    <thead><tr><th>Name</th><th>Token</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+    {% for a in active_apps %}
+      <tr>
+        <td><b>{{ a.app }}</b></td>
+        <td><code>••••••••{{ a.last4 }}</code></td>
+        <td>{{ a.created_at[:10] }}</td>
+        <td style="text-align:right;white-space:nowrap">
+          <button class="btn ghost sm" onclick="askRotate('{{ a.app }}')">Replace token</button>
+          <button class="btn danger sm" onclick="askDelete('{{ a.app }}')">Delete</button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+    <div class="empty">No keys yet. Create one to start sending messages.</div>
+  {% endif %}
+
+  <form method="post" action="/gateway/services/message-gateway/tokens" class="row" style="margin-top:16px;align-items:flex-end" onsubmit="this.querySelector('button').disabled=true">
+    <div style="flex:1;min-width:220px">
+      <label for="app" style="margin-top:0">New key name</label>
+      <input id="app" name="app" placeholder="e.g. my-website" required minlength="2" maxlength="40" pattern="[a-zA-Z0-9._-]{2,40}" autocomplete="off" title="2 to 40 characters: letters, numbers, dot, dash, underscore" />
+    </div>
+    <button class="btn" type="submit">Create key</button>
+  </form>
+  <p class="muted" style="margin:8px 0 0">A key name already in use gets a new token, and the old one stops working right away.</p>
+</div>
+
+<dialog id="dlg">
+  <h3 id="dlgTitle"></h3>
+  <p id="dlgText" class="muted"></p>
+  <form method="post" id="dlgForm" class="row" style="justify-content:flex-end">
+    <input type="hidden" name="app" id="dlgApp" />
+    <button type="button" class="btn ghost" onclick="document.getElementById('dlg').close()">Cancel</button>
+    <button type="submit" class="btn danger" id="dlgGo"></button>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script>
+  function openDlg(app, title, text, action, go) {
+    document.getElementById("dlgTitle").textContent = title;
+    document.getElementById("dlgText").textContent = text;
+    document.getElementById("dlgApp").value = app;
+    document.getElementById("dlgForm").action = action;
+    document.getElementById("dlgGo").textContent = go;
+    document.getElementById("dlg").showModal();
+  }
+  function askRotate(app) { openDlg(app, "Replace token for '" + app + "'?", "The current token stops working immediately. Anything still using it will start failing until you update it with the new token.", "/gateway/services/message-gateway/tokens", "Replace token"); }
+  function askDelete(app) { openDlg(app, "Delete '" + app + "'?", "Its token is revoked immediately. This can't be undone.", "/gateway/services/message-gateway/apps/revoke", "Delete key"); }
+</script>
+{% endblock %}

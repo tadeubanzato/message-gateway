@@ -28,6 +28,7 @@ from app.broker import (
     dead_letter_queue_name,
     republish_from_dead_letter,
 )
+from app.services import message_log
 from app.db import backend_name, get_repository
 from app.schemas import MessageEnqueued, MessageRequest
 from app.services.email import get_email_provider
@@ -132,6 +133,7 @@ def send_notification(
     body: Optional[str] = None,
     template: Optional[str] = None,
     context: Optional[dict] = None,
+    provider: Optional[str] = None,
 ) -> dict:
     """Send a notification (email, sms, or push) through the gateway.
 
@@ -143,10 +145,11 @@ def send_notification(
     template: name of a server-side template to render instead of `body`.
     context: dict of values to substitute into {{context.key}} placeholders
         in the body/template.
+    provider: which connected provider to use (default: the channel's default).
     """
     req = MessageRequest(
         channel=channel, to=to, subject=subject, body=body,
-        template=template, context=context or {},
+        template=template, context=context or {}, provider=provider,
     )
     from app.main import _load_template_text, _render_context  # local import avoids circularity
 
@@ -162,10 +165,7 @@ def send_notification(
     message_ids = []
     for recipient in recipients:
         msg = MessageEnqueued.from_request(req.model_copy(update={"to": recipient, "body": final_body}))
-        try:
-            repo.insert_message({"message_id": msg.message_id, "channel": msg.channel, "status": "queued", "to": recipient})
-        except Exception:
-            pass
+        message_log.record_queued(msg, template=used_template)
         from app.broker import publish_message
 
         publish_message(msg)
@@ -201,7 +201,7 @@ def get_setup_instructions(provider: str) -> dict:
 
 
 @mcp.tool()
-def check_provider_config(channel: str) -> dict:
+def check_provider_config(channel: str, provider: Optional[str] = None) -> dict:
     """Verify the currently-configured provider for a channel has valid
     credentials, by making a lightweight authenticated call to its API.
 
@@ -212,10 +212,10 @@ def check_provider_config(channel: str) -> dict:
     if not getter:
         return {"ok": False, "error": f"Unknown channel {channel!r}. Use email, sms, or push."}
     try:
-        provider = getter()
+        provider_obj = getter(provider)
     except SystemExit as e:
         return {"ok": False, "error": str(e)}
-    result = provider.check_config()
+    result = provider_obj.check_config()
     return {"ok": result.ok, "provider": result.provider, "error": result.error, "status_code": result.status_code}
 
 
@@ -269,7 +269,9 @@ def _rabbitmq_management_queue_info(queue_name: str) -> dict:
     mgmt_port = int(os.environ.get("RABBITMQ_MANAGEMENT_PORT", "15672"))
     user = parsed.username or "guest"
     password = parsed.password or "guest"
-    vhost = (parsed.path or "/").lstrip("/") or "/"
+    # RABBITMQ_URL encodes the default vhost as "/%2F"; decode it first so the
+    # quote() below doesn't double-encode it into %252F (which 404s).
+    vhost = urllib.parse.unquote((parsed.path or "/").lstrip("/")) or "/"
 
     url = (
         f"http://{host}:{mgmt_port}/api/queues/"
@@ -301,8 +303,10 @@ def list_recent_messages(channel: Optional[str] = None, status: Optional[str] = 
     """List recently-enqueued messages, optionally filtered by channel and/or status
     ('queued', 'delivered', 'failed')."""
     try:
+        # Metadata only: this MCP endpoint is unauthenticated, so message
+        # content is only available through the authenticated API/portal.
         msgs = get_repository().list_messages(channel, status, limit)
-        return {"ok": True, "messages": msgs}
+        return {"ok": True, "messages": [message_log.public_view(m, include_content=False) for m in msgs]}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

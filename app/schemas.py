@@ -23,6 +23,9 @@ class MessageRequest(BaseModel):
     emailType: Optional[EmailType] = None
     context: dict[str, Any] = Field(default_factory=dict)
 
+    # Which connected provider to use (default: the channel's default provider)
+    provider: Optional[str] = None
+
     # push-only fields (ignored by other channels)
     app: Optional[str] = None
     device: Optional[str] = None
@@ -102,6 +105,7 @@ class MessageEnqueued(BaseModel):
     subject: Optional[str] = None
     body: str
     emailType: Optional[EmailType] = None
+    provider: Optional[str] = None
     app: Optional[str] = None
     device: Optional[str] = None
     url: Optional[str] = None
@@ -120,6 +124,7 @@ class MessageEnqueued(BaseModel):
             subject=req.subject,
             body=req.body or "",
             emailType=req.emailType,
+            provider=(req.provider or "").strip().lower() or None,
             app=req.app,
             device=req.device,
             url=req.url,
