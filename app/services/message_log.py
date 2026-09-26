@@ -42,6 +42,7 @@ def record_queued(msg: Any, account_id: Optional[str] = None, template: Optional
             "app": msg.app,
             "provider": getattr(msg, "provider", None),
             "email_type": msg.emailType,
+            "is_test": bool((getattr(msg, "meta", None) or {}).get("test")),
             "attempts": 0,
         }
         if store_content_enabled():

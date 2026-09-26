@@ -47,7 +47,7 @@
       <tbody>
       {% for m in recent %}
         <tr>
-          <td>{{ (m.queued_at or '')[:19].replace('T',' ') }}</td><td>{{ m.channel }}</td><td>{{ m.to or '-' }}</td>
+          <td>{{ (m.queued_at or '')[:19].replace('T',' ') }}</td><td>{{ m.channel }}{% if m.is_test %}<span class="badge test">Test</span>{% endif %}</td><td>{{ m.to or '-' }}</td>
           <td><a href="/gateway/messages/{{ m.message_id }}" style="text-decoration:none"><span class="badge {{ m.status }}">{{ m.status }}</span></a></td>
         </tr>
       {% endfor %}

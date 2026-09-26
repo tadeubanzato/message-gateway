@@ -278,6 +278,7 @@ def create_account(name: str, email: str, password: str, password2: str, *, make
         user_key = new_user_key()
         doc = {
             "name": name, "email": email, "user_key": user_key, "password_hash": pw_hash,
+            "role": "admin" if make_admin else "member",
             "services": {"message-gateway": {"service": "message-gateway", "tokens": []}},
             "created_at": _utcnow().isoformat(),
         }

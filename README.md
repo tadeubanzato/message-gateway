@@ -86,14 +86,15 @@ You land on the **Home** page, which shows each channel's status. Next, connect 
 
 ## 3. Connect your channels
 
-Open **Channels** in the top menu (administrator only) and choose Email, SMS or Push. Each
-provider is a card with links (opening in a new tab) to sign in and find your keys. Fill in
-the fields, enter your password to confirm, and click **Connect**. The gateway checks the
+Open **Channels** in the top menu (administrator only) and choose Email, SMS or Push. Pick your
+provider (for example Pushover), and you see only that provider's form, with links (opening in a
+new tab) to sign in and find your keys. Fill in the fields and click **Connect**. The gateway checks the
 credentials, then **Send test** lets you confirm a real message arrives.
 
-You can connect several providers on one channel. One is the **default**; click **Make
-default** to change it. Saved secrets are never shown again: type a new value to replace one,
-or leave the field blank to keep it.
+You can connect several providers on one channel: use **+ Add another provider**. One is the
+**default**; click **Make default** to change it. Saved secrets are never shown again, but the last 4 characters appear beside each field
+(`••••••••1a2b`) so you can compare with the key in your provider's dashboard. Type a new
+value to replace one, or leave the field blank to keep it.
 
 ### Email
 
@@ -146,11 +147,11 @@ country code required). It is used whenever a message doesn't say who to text.
 | **Pushover** | Your user key, plus one or more **applications** (below) |
 | **ntfy** | A topic name (pick a long, hard-to-guess one) and optionally a server URL. Free, no account. Subscribe to the topic in the ntfy app |
 
-**Pushover applications.** Each Pushover application has its own API token (create them at
-pushover.net/apps/build). On the Pushover card, click **+ Add application** for each one:
-give it any name you like, paste its token, and mark one as the **default**. Use the name as
-`"app"` when sending; messages that name no app use the default. Names may contain letters,
-numbers, dots, dashes and underscores. Tokens are stored encrypted, in this form:
+**Pushover.** The form is short: your **user key**, your **default app** (a name and its API token),
+and a **+ Add another app** button for more. Create each app at pushover.net/apps/build. Give an
+app any name you like and use it as `"app"` when sending; messages that name no app use the
+default app. On an extra app, **Make default** swaps it into the default slot. Names may contain
+letters, numbers, dots, dashes and underscores. Tokens are stored encrypted, in this form:
 
 ```
 PUSHOVER_APPS=alerts:PUSHOVER_APPTOKEN_ALERTS,backups:PUSHOVER_APPTOKEN_BACKUPS
@@ -224,6 +225,8 @@ Provider credentials are never handled through MCP: they are entered in the web 
 
 - **Home**: channel status, recent messages, a copyable send example.
 - **Message log**: search and filter everything sent; click a message for its delivery attempts.
+  Messages sent with **Send test** are logged too, with a small **Test** label, and a
+  **Hide tests** filter.
 - **API keys**: create, replace or delete keys. A replaced token stops working immediately.
 - **Settings** (user menu, administrator): keep or drop message content, allow sign-ups, import an old `.env`.
 - **Account** (user menu): your profile and password.
@@ -244,8 +247,8 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
   no login. To reach it from other machines, change the port mapping in `docker-compose.yml`
   *after* setup, and put it behind HTTPS.
 - **Administrator vs members.** The first account is the administrator. Sign-ups are off by
-  default. Members can send messages but can't change settings. Changing credentials asks for
-  the administrator's password again.
+  default. Members can send messages but can't change settings. Everything under Channels and
+  Settings requires the administrator's login session.
 - **Back up your data.** With local storage, your database *and the key that decrypts your
   saved credentials* live in the `gateway_data` Docker volume. Back it up with
   `docker compose cp gateway:/app/data ./gateway-backup` and keep that copy private. If the

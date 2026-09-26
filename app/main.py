@@ -19,7 +19,7 @@ from app.mcp_server.server import mcp
 from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
 from app.routes.portal_ui import router as portal_ui_router
-from app.services import channels, message_log
+from app.services import access, channels, message_log
 from app.version import APP_NAME, APP_VERSION
 from app.schemas import MessageEnqueued, MessageRequest, MessageResponse
 
@@ -55,6 +55,10 @@ def _purge_loop() -> None:
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     get_repository()  # initializes schema/indexes for whichever backend is active
+    try:
+        access.ensure_roles()
+    except Exception:
+        pass  # a labelling problem must never stop the gateway from starting
     threading.Thread(target=_purge_loop, name="log-purge", daemon=True).start()
     async with mcp.session_manager.run():
         yield

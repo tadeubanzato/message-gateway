@@ -84,6 +84,12 @@ class AtlasRepository(Repository):
             raise
         return str(result.inserted_id)
 
+    def list_accounts(self) -> list[dict[str, Any]]:
+        return [_stringify_id(d) for d in self._db.accounts.find({})]
+
+    def update_account_fields(self, account_id: str, fields: dict[str, Any]) -> None:
+        self._db.accounts.update_one({"_id": _to_object_id(account_id)}, {"$set": fields})
+
     def count_accounts(self) -> int:
         return int(self._db.accounts.count_documents({}))
 
@@ -189,6 +195,52 @@ class AtlasRepository(Repository):
 
     def delete_setting(self, name: str) -> None:
         self._db.settings.delete_one({"_id": name})
+
+    # ---- move data to another database ----
+    @staticmethod
+    def _epoch(d: dict[str, Any]) -> float:
+        c = d.get("created_at")
+        if isinstance(c, datetime):
+            return (c if c.tzinfo else c.replace(tzinfo=timezone.utc)).timestamp()
+        return time.time()
+
+    def export_data(self) -> dict[str, list[dict[str, Any]]]:
+        def without(d: dict[str, Any], *keys: str) -> dict[str, Any]:
+            return {k: v for k, v in d.items() if k not in keys}
+
+        return {
+            "accounts": [{**d, "_id": str(d["_id"])} for d in self._db.accounts.find({})],
+            "portal_sessions": [without(d, "_id") for d in self._db.portal_sessions.find({})],
+            "messages": [{**without(d, "_id", "created_at"), "_created_at": self._epoch(d)} for d in self._db.messages.find({})],
+            "attempts": [{**without(d, "_id", "created_at"), "_id": str(d["_id"]), "_created_at": self._epoch(d)}
+                         for d in self._db.attempts.find({})],
+            "settings": [{**d, "_id": str(d["_id"])} for d in self._db.settings.find({})],
+        }
+
+    def import_data(self, data: dict[str, list[dict[str, Any]]]) -> None:
+        for d in data.get("accounts", []):
+            doc = {**d, "_id": _to_object_id(str(d["_id"]))}  # keeps ids identical; ObjectId-shaped ids stay ObjectIds
+            self._db.accounts.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+        for d in data.get("portal_sessions", []):
+            self._db.portal_sessions.replace_one({"session_id": d["session_id"]}, dict(d), upsert=True)
+        for d in data.get("messages", []):
+            doc = dict(d); doc.pop("_id", None)
+            doc["created_at"] = datetime.fromtimestamp(float(doc.pop("_created_at", None) or time.time()), tz=timezone.utc)
+            self._db.messages.replace_one({"message_id": doc["message_id"]}, doc, upsert=True)
+        attempts = []
+        for d in data.get("attempts", []):
+            doc = dict(d); doc.pop("_id", None)
+            doc["created_at"] = datetime.fromtimestamp(float(doc.pop("_created_at", None) or time.time()), tz=timezone.utc)
+            attempts.append(doc)
+        if attempts:
+            self._db.attempts.insert_many(attempts)
+        for d in data.get("settings", []):
+            doc = dict(d); name = doc.pop("_id")
+            self._db.settings.replace_one({"_id": name}, {"_id": name, **doc}, upsert=True)
+
+    def counts(self) -> dict[str, int]:
+        return {t: int(self._db[t].count_documents({}))
+                for t in ("accounts", "portal_sessions", "messages", "attempts", "settings")}
 
     # ---- lifecycle ----
     def ensure_indexes(self) -> None:

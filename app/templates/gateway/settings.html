@@ -14,8 +14,6 @@
     <input type="checkbox" id="allowSignups" style="width:auto;margin-top:4px" {{ 'checked' if allow_signups }} />
     <span><b>Allow new sign-ups</b><br /><span class="muted">Off by default. When on, anyone who can reach this gateway can create an account. They can send messages but can't change settings.</span></span>
   </label>
-  <label for="gpw">Your password (to confirm)</label>
-  <input id="gpw" type="password" autocomplete="current-password" style="max-width:300px" />
   <div class="row"><button class="btn" id="saveGeneral">Save</button></div>
   <div id="gout"></div>
 </div>
@@ -26,8 +24,6 @@
   <input type="file" id="envfile" accept=".env,text/plain" style="max-width:340px" />
   <label for="envtext">…or paste it here</label>
   <textarea id="envtext" rows="5" spellcheck="false" autocomplete="off" placeholder="MAILJET_API_KEY=…" style="width:100%;font-family:ui-monospace,monospace;font-size:13px"></textarea>
-  <label for="ipw">Your password (to confirm)</label>
-  <input id="ipw" type="password" autocomplete="current-password" style="max-width:300px" />
   <div class="row"><button class="btn" id="doImport">Import settings</button></div>
   <div id="iout"></div>
 </div>
@@ -35,18 +31,48 @@
 <div class="card">
   <h2>Database</h2>
   <div class="kv">
-    <div class="k">Storage</div><div>{{ 'MongoDB Atlas (remote)' if backend == 'atlas' else 'Local (SQLite, on this computer)' }}</div>
+    <div class="k">Storage</div><div>{{ 'MongoDB Atlas (remote)' if db.backend == 'atlas' else 'Local (SQLite, on this computer)' }}</div>
+    {% if db.backend == 'atlas' %}
+    <div class="k">Cluster</div><div><code>{{ db.db_host }}</code></div>
+    <div class="k">Database name</div><div><code>{{ db.db_name }}</code></div>
+    <div class="k">Connection string</div><div>{% if db.db_tail %}<span class="tail">••••••••{{ db.db_tail }}</span>{% else %}<span class="tail">•••••••• saved</span>{% endif %}</div>
+    {% endif %}
     <div class="k">Status</div><div><span class="badge {{ 'ready' if db_ok else 'failed' }}">{{ 'Connected' if db_ok else 'Not reachable' }}</span></div>
   </div>
-  <p class="muted" style="margin:10px 0 0">The database can't be switched from here, because your accounts and message history live in it. To move to a different database, start a new gateway and set it up there.</p>
+
+  {% if db.locked_by %}
+  <div class="msg" style="background:var(--warnbg);color:var(--warn)">The database is set by an environment variable ({{ db.locked_by | join(', ') }}), so it can't be changed here. Remove it from your <code>.env</code> file and recreate the container to manage it on this page.</div>
+  {% else %}
+  <div class="row" style="margin-top:12px"><button class="btn ghost" id="dbChange">Change database…</button></div>
+
+  <div id="dbPanel" class="hidden" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">
+    <p class="muted" style="margin-top:0">Move to a different database, for example from Atlas to this computer, or to another Atlas cluster or database name. Your accounts, saved credentials and message history are <b>copied</b> to the new database and you stay signed in. The current database is left exactly as it is.</p>
+    <label class="opt"><input type="radio" name="dbtarget" value="sqlite" /><span><b>This computer (SQLite)</b><small>Local file. No accounts needed.</small></span></label>
+    <label class="opt"><input type="radio" name="dbtarget" value="atlas" /><span><b>MongoDB Atlas (remote)</b><small>A managed cloud database. Needs a connection string.</small></span></label>
+    <div id="dbAtlas" class="hidden">
+      <label for="dbUri">Connection string</label>
+      <input id="dbUri" type="password" autocomplete="off" placeholder="mongodb+srv://user:password@cluster.mongodb.net/" />
+      <label for="dbName">Database name</label>
+      <input id="dbName" autocomplete="off" value="{{ db.db_name or 'relay_gateway' }}" />
+      <p class="help">In Atlas, allow your IP under Network Access and use a user with read/write access.</p>
+    </div>
+    <label class="opt" id="dbCopyRow" style="margin-top:12px"><input type="checkbox" id="dbCopy" checked /><span><b>Copy my data to the new database (recommended)</b><small>Accounts, saved credentials (still encrypted), message history and your login.</small></span></label>
+    <div id="dbExisting" class="hidden">
+      <div class="msg" style="background:var(--warnbg);color:var(--warn)" id="dbExistingMsg"></div>
+      <label class="opt" style="margin-top:10px"><input type="checkbox" id="dbUseExisting" /><span><b>Switch to it anyway and use its data</b><small>You may be asked to log in again, with an account from that database. Saved credentials there may need to be entered again.</small></span></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn ghost" id="dbTest">Test connection</button><button class="btn" id="dbSwitch">Switch database</button><button class="btn ghost" id="dbCancel">Cancel</button></div>
+    <div id="dbOut"></div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}
 {% block scripts %}
 <script>
   document.getElementById("saveGeneral").onclick = function (ev) {
     var b = ev.target, out = document.getElementById("gout"); b.disabled = true;
-    window.MG.post("/gateway/settings/general", { store_content: document.getElementById("storeContent").checked, allow_signups: document.getElementById("allowSignups").checked, password: document.getElementById("gpw").value })
-      .then(function () { document.getElementById("gpw").value = ""; window.MG.say(out, "Saved.", "ok"); })
+    window.MG.post("/gateway/settings/general", { store_content: document.getElementById("storeContent").checked, allow_signups: document.getElementById("allowSignups").checked })
+      .then(function () { window.MG.say(out, "Saved.", "ok"); })
       .catch(function (e) { window.MG.say(out, e.message, "err"); })
       .then(function () { b.disabled = false; });
   };
@@ -57,9 +83,9 @@
   };
   document.getElementById("doImport").onclick = function (ev) {
     var b = ev.target, out = document.getElementById("iout"); b.disabled = true;
-    window.MG.post("/gateway/settings/import", { text: document.getElementById("envtext").value, password: document.getElementById("ipw").value })
+    window.MG.post("/gateway/settings/import", { text: document.getElementById("envtext").value })
       .then(function (r) {
-        document.getElementById("ipw").value = ""; document.getElementById("envtext").value = ""; document.getElementById("envfile").value = "";
+        document.getElementById("envtext").value = ""; document.getElementById("envfile").value = "";
         var c = Object.keys(r.connected || {}).map(function (ch) { return ch + ": " + r.connected[ch].join(", "); });
         window.MG.say(out, (c.length ? "Imported. Connected " + c.join("; ") + "." : "Nothing recognizable was found in that file.") +
           (r.skipped && r.skipped.length ? " Skipped " + r.skipped.length + " other setting(s) that the gateway manages itself." : "") +
@@ -68,5 +94,46 @@
       .catch(function (e) { window.MG.say(out, e.message, "err"); })
       .then(function () { b.disabled = false; });
   };
+
+  (function () {
+    var $ = function (id) { return document.getElementById(id); };
+    if (!$("dbChange")) return;
+    var out = $("dbOut"), post = window.MG.post, say = window.MG.say;
+    function target() { var r = document.querySelector('input[name="dbtarget"]:checked'); return r ? r.value : null; }
+    function payload() { return { backend: target(), mongodb_uri: $("dbUri").value, mongodb_db: $("dbName").value, copy: $("dbCopy").checked, use_existing: $("dbUseExisting").checked }; }
+    function showExisting(msg) { $("dbExisting").classList.remove("hidden"); $("dbExistingMsg").textContent = msg; $("dbCopyRow").classList.add("hidden"); }
+    function hideExisting() { $("dbExisting").classList.add("hidden"); $("dbUseExisting").checked = false; $("dbCopyRow").classList.remove("hidden"); }
+    $("dbChange").onclick = function () { $("dbPanel").classList.toggle("hidden"); };
+    $("dbCancel").onclick = function () { $("dbPanel").classList.add("hidden"); out.innerHTML = ""; hideExisting(); };
+    document.querySelectorAll('input[name="dbtarget"]').forEach(function (r) {
+      r.addEventListener("change", function () { $("dbAtlas").classList.toggle("hidden", target() !== "atlas"); hideExisting(); out.innerHTML = ""; });
+    });
+    $("dbTest").onclick = function (ev) {
+      if (!target()) { say(out, "Choose where the data should go.", "err"); return; }
+      var b = ev.target; b.disabled = true; b.textContent = "Testing…";
+      post("/gateway/settings/database/check", payload())
+        .then(function (r) {
+          if (!r.ok) { hideExisting(); say(out, r.error || "Could not connect.", "err"); return; }
+          if (r.has_data) { showExisting("That database already contains a gateway (" + r.accounts + " account" + (r.accounts === 1 ? "" : "s") + "). Your data won't be copied into it."); say(out, "Connected.", "ok"); }
+          else { hideExisting(); say(out, "Connected. It's empty, so your data will be copied into it.", "ok"); }
+        })
+        .catch(function (e) { say(out, e.message, "err"); })
+        .then(function () { b.disabled = false; b.textContent = "Test connection"; });
+    };
+    $("dbSwitch").onclick = function (ev) {
+      if (!target()) { say(out, "Choose where the data should go.", "err"); return; }
+      var b = ev.target; b.disabled = true; b.textContent = "Switching…";
+      post("/gateway/settings/database/switch", payload())
+        .then(function (r) {
+          if (r.needs_confirm) { showExisting(r.error); say(out, "Tick 'Switch to it anyway' to continue, or choose an empty database.", "err"); return; }
+          if (!r.ok) { say(out, r.error || "Could not switch.", "err"); return; }
+          var c = r.copied || {}, parts = Object.keys(c).map(function (k) { return c[k] + " " + k; });
+          say(out, "Switched to " + (r.backend === "atlas" ? "MongoDB Atlas" : "this computer (SQLite)") + "." + (parts.length ? " Copied " + parts.join(", ") + "." : "") + (r.signed_out ? " You may be asked to log in again." : ""), "ok");
+          setTimeout(function () { window.location = r.signed_out ? "/gateway/login" : "/gateway/settings"; }, 1800);
+        })
+        .catch(function (e) { say(out, e.message, "err"); })
+        .then(function () { b.disabled = false; b.textContent = "Switch database"; });
+    };
+  })();
 </script>
 {% endblock %}

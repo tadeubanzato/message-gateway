@@ -22,11 +22,9 @@ import inspect
 import json
 import os
 import re
-import time
 from typing import Any, Optional, Union
 
 import pika
-from fastapi import HTTPException
 from mcp.server.fastmcp import Context, FastMCP
 
 from app.auth import authenticate
@@ -38,7 +36,7 @@ from app.broker import (
 )
 from app.db import backend_name, get_repository
 from app.schemas import MessageRequest
-from app.services import access, channels, message_log, secret_store
+from app.services import access, channels, dispatch, message_log, secret_store
 from app.services.phone import normalize_phone
 
 GATEWAY_BASE_URL = (os.environ.get("GATEWAY_BASE_URL") or "http://localhost:8010").strip().rstrip("/")
@@ -197,50 +195,20 @@ def _recipients(to: Union[str, list[str], None]) -> Optional[Union[str, list[str
 async def _send(ctx: Context, wait_seconds: int, **fields: Any) -> dict:
     """Queue a message for the caller's account, then wait briefly for the result."""
     ident = _who(ctx)
-    from app.main import enqueue_message  # local import: main imports this module
-
     channel = fields.get("channel")
     try:
         req = MessageRequest(**{k: v for k, v in fields.items() if v is not None})
-        resp = await asyncio.to_thread(enqueue_message, req, ident["account_id"])
-    except HTTPException as e:
-        detail = e.detail
-        extra = {k: detail[k] for k in ("available", "default", "available_apps") if isinstance(detail, dict) and k in detail}
-        out = {"ok": False, "error": detail.get("error") if isinstance(detail, dict) else str(detail), **extra}
-        if e.status_code == 409 and channel in channels.CATALOG:
-            out["setup_page"] = f"{GATEWAY_BASE_URL}/gateway/channels/{channel}"
-            out["hint"] = f"The administrator can connect a {channel} provider at the setup_page URL."
-        return out
     except ValueError as e:
-        return {"ok": False, "error": str(e)}
-
-    ids = [resp.message_id] if getattr(resp, "message_id", None) else list(getattr(resp, "message_ids", None) or [])
-    result: dict[str, Any] = {"ok": True, "message_ids": ids, "status": "queued"}
-    if not ids or wait_seconds <= 0:
-        return result
-
-    repo = get_repository()
-    deadline = time.monotonic() + min(int(wait_seconds), 30)
-    docs: list[dict[str, Any]] = []
-    while True:
-        docs = await asyncio.to_thread(lambda: [d for d in (repo.get_message(i) for i in ids) if d])
-        if len(docs) == len(ids) and all(d.get("status") != "queued" for d in docs):
-            break
-        if time.monotonic() >= deadline:
-            break
-        await asyncio.sleep(0.5)
-
-    statuses = [d.get("status") for d in docs]
-    if statuses and all(s == "delivered" for s in statuses):
-        result.update(status="delivered", provider=docs[0].get("provider"))
-    elif any(s == "failed" for s in statuses):
-        failed = next(d for d in docs if d.get("status") == "failed")
-        result.update(ok=False, status="failed", provider=failed.get("provider"),
-                      error=failed.get("last_error") or "Delivery failed.",
-                      hint="Use get_message for the full delivery attempts.")
-    else:
-        result.update(note="Still being delivered. Use get_message to check the result shortly.")
-    return result
+        msg = "; ".join(x.get("msg", "").removeprefix("Value error, ") for x in e.errors()) if hasattr(e, "errors") else str(e)
+        return {"ok": False, "error": msg}
+    out = await asyncio.to_thread(dispatch.send_and_wait, req, ident["account_id"], wait_seconds)
+    code = out.pop("status_code", None)
+    if not out.get("ok") and code == 409 and channel in channels.CATALOG:
+        out["setup_page"] = f"{GATEWAY_BASE_URL}/gateway/channels/{channel}"
+        out["hint"] = f"The administrator can connect a {channel} provider at the setup_page URL."
+    if out.get("status") == "failed":
+        out["hint"] = "Use get_message for the full delivery attempts."
+    return out
 
 
 @tool()
@@ -339,7 +307,7 @@ async def send_test(
     text = "Test message from Message Gateway, sent by your AI agent. If you can read this, it works."
     if ch == "push":
         return await _send(ctx, wait_seconds, channel="push", body=text, subject="Message Gateway test",
-                     app=app, provider=provider)
+                           app=app, provider=provider, meta={"test": True})
     if ch == "email":
         target = (to or "").strip()
         if not target:
@@ -348,12 +316,12 @@ async def send_test(
         if not target:
             return {"ok": False, "error": "Say which email address to send the test to."}
         return await _send(ctx, wait_seconds, channel="email", to=_recipients(target), subject="Message Gateway test",
-                     body=text, emailType="txt", provider=provider)
+                           body=text, emailType="txt", provider=provider, meta={"test": True})
     if not (to or "").strip():
         if not channels.default_sms_number():
             return {"ok": False, "error": "Say which phone number to send the test to (with country code), or ask the administrator to set a default phone number."}
-        return await _send(ctx, wait_seconds, channel="sms", body=text, provider=provider)  # default number
-    return await _send(ctx, wait_seconds, channel="sms", to=_phone(to), body=text, provider=provider)
+        return await _send(ctx, wait_seconds, channel="sms", body=text, provider=provider, meta={"test": True})  # default number
+    return await _send(ctx, wait_seconds, channel="sms", to=_phone(to), body=text, provider=provider, meta={"test": True})
 
 
 # ---------------------------------------------------------------------

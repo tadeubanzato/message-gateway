@@ -47,6 +47,15 @@ class Repository(ABC):
         ...
 
     @abstractmethod
+    def list_accounts(self) -> list[dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    def update_account_fields(self, account_id: str, fields: dict[str, Any]) -> None:
+        """Set top-level fields on an account document."""
+        ...
+
+    @abstractmethod
     def count_accounts(self) -> int:
         ...
 
@@ -139,6 +148,23 @@ class Repository(ABC):
 
     @abstractmethod
     def delete_setting(self, name: str) -> None:
+        ...
+
+    # ---- move data to another database (Settings > Database) ----
+    @abstractmethod
+    def export_data(self) -> dict[str, list[dict[str, Any]]]:
+        """Everything needed to recreate this gateway elsewhere: accounts, portal_sessions,
+        messages, attempts, settings. Ids are preserved; message/attempt times are exported
+        as epoch seconds in "_created_at". Setting values stay encrypted."""
+        ...
+
+    @abstractmethod
+    def import_data(self, data: dict[str, list[dict[str, Any]]]) -> None:
+        """Load data produced by export_data() from either backend."""
+        ...
+
+    @abstractmethod
+    def counts(self) -> dict[str, int]:
         ...
 
     # ---- lifecycle ----

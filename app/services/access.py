@@ -38,6 +38,20 @@ def is_owner(account: dict[str, Any]) -> bool:
     return str(account.get("_id")) == owner_id()
 
 
+def ensure_roles() -> None:
+    """Make the administrator visible in the database: every account gets role "admin" or
+    "member". New accounts get it when created; this fills in accounts that predate it and
+    keeps the label in step with who the administrator is. Safe to run repeatedly."""
+    admin_id = owner_id()
+    if not admin_id:
+        return
+    repo = get_repository()
+    for acct in repo.list_accounts():
+        role = "admin" if str(acct.get("_id")) == admin_id else "member"
+        if acct.get("role") != role:
+            repo.update_account_fields(str(acct["_id"]), {"role": role})
+
+
 def has_accounts() -> bool:
     return get_repository().count_accounts() > 0
 
