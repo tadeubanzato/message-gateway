@@ -18,7 +18,7 @@
   <h2>How it works</h2>
   <p style="margin-top:0">Your programs call one API. The gateway puts each message in a queue, a background worker delivers it through the provider you connected (for example Mailjet, Twilio or Pushover), retries if the provider has a temporary problem, and records the result in the <a href="/gateway/messages">message log</a>.</p>
   <ul style="margin:0;padding-left:20px">
-    <li>Connect providers in <a href="/gateway/settings">Settings</a> (owner only).</li>
+    <li>The administrator connects providers on the Channels pages and manages settings.</li>
     <li>Create keys for your programs in <a href="/gateway/keys">API keys</a>.</li>
     <li>Messages that keep failing are set aside instead of being lost.</li>
   </ul>
@@ -31,7 +31,7 @@
     <div class="k">Read your log</div><div><code>GET {{ base_url }}/v1/messages</code></div>
     <div class="k">Health check</div><div><code>GET {{ base_url }}/health</code></div>
     <div class="k">API reference</div><div><a href="/scalar">Interactive docs</a> · <a href="/docs">Swagger</a> · <a href="/openapi.json">OpenAPI</a></div>
-    <div class="k">AI agents (MCP)</div><div><code>{{ mcp_url }}</code></div>
+    <div class="k">AI agents (MCP)</div><div><code>{{ mcp_url }}</code> (same key and token as the API)</div>
   </div>
   <p class="muted" style="margin:10px 0 0">Authenticate with your <code>X-User-Key</code> and <code>X-API-Token</code> headers. See <a href="/gateway/keys">API keys</a>.</p>
 </div>

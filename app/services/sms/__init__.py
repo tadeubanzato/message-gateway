@@ -7,7 +7,7 @@ from app.services.sms.base import SmsProvider
 PROVIDER_REGISTRY = {
     "twilio": "app.services.sms.twilio:TwilioProvider",
     "infobip": "app.services.sms.infobip:InfobipProvider",
-    "local_modem": "app.services.sms.local_modem:LocalModemProvider",
+    "custom_http": "app.services.sms.custom_http:CustomHttpProvider",
 }
 
 _cache: dict[str, SmsProvider] = {}

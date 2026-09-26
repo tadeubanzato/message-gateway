@@ -1,5 +1,5 @@
 """Infobip SMS provider (thinner implementation — send + check_config, stub-quality
-compared to Twilio/local_modem which are the fully-verified defaults)."""
+compared to Twilio which are the fully-verified defaults)."""
 
 from __future__ import annotations
 

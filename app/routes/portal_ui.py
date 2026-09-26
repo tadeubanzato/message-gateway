@@ -2,8 +2,8 @@
 Portal pages after login: Home, Message log, API keys, Settings, About, Account.
 
 All pages share gateway/base.html (navbar + /static/app.css). Settings is
-owner-only, and every change to credentials or general options requires the
-owner's password again.
+administrator-only, and every change to credentials or general options requires
+the administrator's password again.
 """
 
 from __future__ import annotations
@@ -181,15 +181,15 @@ async def change_password(request: Request):
 
 
 # ---------------------------------------------------------------------
-# Owner-only helpers
+# Administrator-only helpers
 # ---------------------------------------------------------------------
 def _owner_or_error(request: Request, password: Optional[str] = None) -> dict[str, Any]:
-    """Session must belong to the owner; when `password` is given it must match."""
+    """Session must belong to the administrator; when `password` is given it must match."""
     account = _load_account_from_session(request)
     if not account:
         raise HTTPException(status_code=401, detail="Please log in again.")
     if not access.is_owner(account):
-        raise HTTPException(status_code=403, detail="Only the owner can change settings.")
+        raise HTTPException(status_code=403, detail="Only an administrator can change settings.")
     if password is not None and not verify_password(password or "", account.get("password_hash", "")):
         raise HTTPException(status_code=400, detail="That password is incorrect.")
     return account
@@ -200,7 +200,7 @@ def _forbidden(request: Request, account: dict[str, Any], active: str):
 
 
 # ---------------------------------------------------------------------
-# Channels (owner only): one page per channel, several providers each
+# Channels (administrator only): one page per channel, several providers each
 # ---------------------------------------------------------------------
 @router.get("/gateway/channels", response_class=HTMLResponse)
 def channels_index():
@@ -223,8 +223,14 @@ def channel_page(request: Request, channel: str):
         "spec": channels.public_catalog()[channel], "status": status,
     }
     return templates.TemplateResponse(
-        "gateway/channel.html", page_ctx(request, account, "channels", ch=status, payload=payload)
+        "gateway/channel.html",
+        page_ctx(request, account, "channels", ch=status, payload=payload, unreadable=secret_store.unreadable_count()),
     )
+
+
+class AppItem(BaseModel):
+    name: str = ""
+    token: str = ""
 
 
 class SaveBody(BaseModel):
@@ -232,6 +238,8 @@ class SaveBody(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
     password: str = ""
     make_default: Optional[bool] = None
+    apps: Optional[list[AppItem]] = None      # Pushover: the complete list of named apps
+    default_app: Optional[str] = None
 
 
 class ProviderBody(BaseModel):
@@ -242,6 +250,7 @@ class ProviderBody(BaseModel):
 class TestBody(BaseModel):
     provider: Optional[str] = None
     to: Optional[str] = None
+    app: Optional[str] = None
 
 
 def _known_channel(channel: str) -> None:
@@ -253,7 +262,11 @@ def _known_channel(channel: str) -> None:
 def channel_save(request: Request, channel: str, body: SaveBody):
     _known_channel(channel)
     _owner_or_error(request, body.password)
-    result = channels.apply_provider(channel, body.provider, body.values, body.make_default)
+    result = channels.apply_provider(
+        channel, body.provider, body.values, body.make_default,
+        apps=[a.model_dump() for a in body.apps] if body.apps is not None else None,
+        default_app=body.default_app,
+    )
     result["status"] = channels.channel_status(channel)
     return result
 
@@ -276,15 +289,29 @@ def channel_remove(request: Request, channel: str, body: ProviderBody):
     return result
 
 
+class DefaultsBody(BaseModel):
+    values: dict[str, str] = Field(default_factory=dict)
+    password: str = ""
+
+
+@router.post("/gateway/channels/{channel}/defaults", include_in_schema=False)
+def channel_defaults_save(request: Request, channel: str, body: DefaultsBody):
+    _known_channel(channel)
+    _owner_or_error(request, body.password)
+    result = channels.save_defaults(channel, body.values)
+    result["status"] = channels.channel_status(channel)
+    return result
+
+
 @router.post("/gateway/channels/{channel}/test", include_in_schema=False)
 def channel_test(request: Request, channel: str, body: TestBody):
     _known_channel(channel)
     _owner_or_error(request)
-    return channels.send_test(channel, body.to, body.provider)
+    return channels.send_test(channel, body.to, body.provider, body.app)
 
 
 # ---------------------------------------------------------------------
-# Settings (owner only): general options
+# Settings (administrator only): general options
 # ---------------------------------------------------------------------
 @router.get("/gateway/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
@@ -309,6 +336,19 @@ class GeneralBody(BaseModel):
     store_content: bool
     allow_signups: bool
     password: str = ""
+
+
+class ImportBody(BaseModel):
+    text: str
+    password: str = ""
+
+
+@router.post("/gateway/settings/import", include_in_schema=False)
+def settings_import(request: Request, body: ImportBody):
+    _owner_or_error(request, body.password)
+    if len(body.text) > 200_000:
+        raise HTTPException(status_code=400, detail="That file is too large to be a .env file.")
+    return channels.import_env_text(body.text)
 
 
 @router.post("/gateway/settings/general", include_in_schema=False)

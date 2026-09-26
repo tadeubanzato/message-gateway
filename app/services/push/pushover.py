@@ -1,15 +1,15 @@
 """
-Pushover push provider. Ported from the old codebase's
-services/push/push_notification.py, but generalized: app-name -> env-var
-token mapping is no longer hardcoded to specific personal app names
-(the old code had hyotoko/pihole/space baked in). Instead, apps are declared
-via a single PUSHOVER_APPS env var mapping "app_name:ENV_VAR_NAME" pairs, so
-any user can define their own app names without touching code.
+Pushover push provider.
 
-Example .env:
-  PUSHOVER_APPS=default:PUSHOVER_APPTOKEN_DEFAULT,work:PUSHOVER_APPTOKEN_WORK
-  PUSHOVER_APPTOKEN_DEFAULT=...
-  PUSHOVER_APPTOKEN_WORK=...
+Apps are declared with a single PUSHOVER_APPS setting mapping "app_name:ENV_VAR_NAME"
+pairs, so anyone can define their own app names without touching code. In the web
+app these are managed on the Pushover card (Channels > Push); each token is stored
+encrypted.
+
+Example (advanced .env use):
+  PUSHOVER_APPS=alerts:PUSHOVER_APPTOKEN_ALERTS,backups:PUSHOVER_APPTOKEN_BACKUPS
+  PUSHOVER_APPTOKEN_ALERTS=...
+  PUSHOVER_APPTOKEN_BACKUPS=...
 """
 
 from __future__ import annotations
@@ -46,6 +46,17 @@ def _parse_app_map() -> dict[str, str]:
     return mapping
 
 
+def _default_app_name(app_map: dict[str, str]) -> str:
+    """The app used when a message names none: PUSHOVER_DEFAULT_APP if set and
+    configured, else an app called "default", else the first configured app."""
+    chosen = (_env("PUSHOVER_DEFAULT_APP", "") or "").strip().lower()
+    if chosen in app_map:
+        return chosen
+    if "default" in app_map:
+        return "default"
+    return next(iter(app_map), "default")
+
+
 def _looks_like_http_url(u: str) -> bool:
     uu = (u or "").strip().lower()
     return uu.startswith("http://") or uu.startswith("https://")
@@ -60,7 +71,7 @@ class PushoverProvider(PushProvider):
 
     def _resolve_app_token(self, app: Optional[str]) -> tuple[Optional[str], Optional[str]]:
         app_map = _parse_app_map()
-        a = (app or "").strip().lower() or "default"
+        a = (app or "").strip().lower() or _default_app_name(app_map)
         env_name = app_map.get(a)
         if not env_name:
             allowed = ", ".join(sorted(app_map.keys()))
@@ -133,7 +144,7 @@ class PushoverProvider(PushProvider):
 
     def check_config(self) -> PushResult:
         user_key = _env("PUSHOVER_USER_KEY")
-        app_token, err = self._resolve_app_token("default")
+        app_token, err = self._resolve_app_token(None)  # checks the default app
         if not user_key:
             return PushResult(ok=False, provider=self.name, error="Missing PUSHOVER_USER_KEY")
         if err:

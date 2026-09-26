@@ -4,6 +4,18 @@
 <h1>Welcome, {{ user_name }}</h1>
 <p class="sub">Your gateway at a glance.</p>
 
+{% if is_owner and not (channels | selectattr('connected') | list) %}
+<div class="card" style="border-color:var(--link)">
+  <h2>Next: connect your first channel</h2>
+  <p style="margin:0 0 10px">Pick how you want to send messages, then add a provider. It takes a couple of minutes.</p>
+  <div class="actions" style="margin-top:0">
+    <a class="btn" href="/gateway/channels/push">Set up Push</a>
+    <a class="btn ghost" href="/gateway/channels/email">Set up Email</a>
+    <a class="btn ghost" href="/gateway/channels/sms">Set up SMS</a>
+  </div>
+</div>
+{% endif %}
+
 <div class="grid">
   {% for c in channels %}
   <div class="card">
@@ -22,7 +34,7 @@
           <a class="btn sm" href="/gateway/channels/{{ c.channel }}">Set up</a>
         {% endif %}
       </div>
-    {% elif c.state != 'ready' %}<p class="muted" style="margin:10px 0 0">The owner of this gateway sets this up.</p>{% endif %}
+    {% elif c.state != 'ready' %}<p class="muted" style="margin:10px 0 0">The administrator of this gateway sets this up.</p>{% endif %}
   </div>
   {% endfor %}
 </div>
@@ -56,6 +68,6 @@
   -H "Content-Type: application/json" \
   -d '{"channel":"push","app":"default","body":"Hello from my gateway"}'</code></pre>
   <button class="btn ghost sm" onclick="copyText(document.getElementById('snippet').textContent, this)">Copy</button>
-  <span class="muted" style="margin-left:8px">Email needs <code>to</code>, <code>subject</code> and <code>emailType</code>; SMS needs <code>to</code>.</span>
+  <span class="muted" style="margin-left:8px">Email needs <code>to</code> and <code>subject</code>; SMS needs <code>to</code>.</span>
 </div>
 {% endblock %}

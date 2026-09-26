@@ -3,15 +3,18 @@ import os
 import re
 import threading
 import time
+from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
+from app import bootstrap
 from app.auth import require_api_key
 from app.broker import publish_message
 from app.db import backend_name, get_repository
+from app.mcp_server.auth import McpAuthMiddleware
 from app.mcp_server.server import mcp
 from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
@@ -58,6 +61,9 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=_lifespan)
+
+# The MCP endpoint requires the same API key and token as the HTTP API.
+app.add_middleware(McpAuthMiddleware)
 
 # One stylesheet for every page (setup, portal, get-started).
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
@@ -144,7 +150,10 @@ def health():
         repo_ok = get_repository().ping()
     except Exception:
         repo_ok = False
-    return {"ok": True, "db_backend": backend_name(), "db_ok": repo_ok}
+    return {
+        "ok": True, "db_backend": backend_name(), "db_ok": repo_ok,
+        "data_persistent": bootstrap.data_is_persistent(),
+    }
 
 
 @app.get("/scalar", include_in_schema=False)
@@ -216,8 +225,9 @@ def get_email_template_expected_context(template_name: str, auth: dict = Depends
     }
 
 
-@app.post("/v1/messages", response_model=MessageResponse, response_model_exclude_none=True)
-def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
+def enqueue_message(req: MessageRequest, account_id: Optional[str]) -> MessageResponse:
+    """Validate a message request, log it and queue it for delivery. Shared by the
+    HTTP API and the MCP server. Raises HTTPException on invalid input."""
     input_was_list = isinstance(req.to, list)
     channel = req.channel
     recipients = req.to_list_deduped()
@@ -225,6 +235,13 @@ def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
     if not recipients:
         if channel == "push":
             recipients = [""]
+        elif channel == "sms" and channels.default_sms_number():
+            recipients = [channels.default_sms_number()]
+        elif channel == "sms":
+            raise HTTPException(
+                status_code=400,
+                detail="Missing 'to'. Give a phone number, or ask the administrator to set a default phone number (Channels > SMS).",
+            )
         else:
             raise HTTPException(status_code=400, detail="Missing 'to' recipient(s)")
 
@@ -242,14 +259,37 @@ def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
         final_subject = _render_context(req.subject or "", req.context)
 
     requested = (req.provider or "").strip().lower() or None
+    connected = channels.connected_providers(channel)
+    if not requested and channels.default_provider(channel) not in connected:
+        # Refuse now, with a clear reason, instead of queueing a message that can never be delivered.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": (
+                    f"No {channel} provider is connected yet. The gateway administrator needs to connect one"
+                    if not connected else
+                    f"The default {channel} provider isn't connected. Pass \"provider\" to choose one of the connected providers, or ask the administrator to fix the default"
+                ),
+                "available": connected, "default": channels.default_provider(channel),
+            },
+        )
     if requested:
-        connected = channels.connected_providers(channel)
         if requested not in connected:
             raise HTTPException(
                 status_code=400,
                 detail={"error": f"Provider '{requested}' isn't set up for {channel}.",
                         "available": connected, "default": channels.default_provider(channel)},
             )
+
+    if channel == "push" and (req.app or "").strip():
+        effective = requested or channels.default_provider(channel)
+        if effective == "pushover":
+            names = [a["name"] for a in channels.pushover_apps()]
+            if names and req.app.strip().lower() not in names:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": f"Pushover app '{req.app.strip()}' isn't set up.", "available_apps": names},
+                )
 
     message_ids: list[str] = []
 
@@ -262,7 +302,7 @@ def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
         req_one = req.model_copy(update=update_payload)
         msg = MessageEnqueued.from_request(req_one)
 
-        message_log.record_queued(msg, auth.get("account_id"), used_template)
+        message_log.record_queued(msg, account_id, used_template)
 
         publish_message(msg)
         message_ids.append(msg.message_id)
@@ -272,6 +312,11 @@ def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
     if len(message_ids) == 1:
         return MessageResponse(status="queued", message_id=message_ids[0], to_deduped=to_deduped_field, template=used_template)
     return MessageResponse(status="queued", message_ids=message_ids, to_deduped=to_deduped_field, template=used_template)
+
+
+@app.post("/v1/messages", response_model=MessageResponse, response_model_exclude_none=True)
+def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
+    return enqueue_message(req, auth.get("account_id"))
 
 
 @app.get("/v1/messages", tags=["Message log"], summary="List your sent messages")
@@ -305,7 +350,9 @@ def get_message(message_id: str, auth: dict = Depends(require_api_key)):
 def list_providers(auth: dict = Depends(require_api_key)):
     """For each channel, the connected providers and the default. Pass any of
     these as "provider" in POST /v1/messages to choose one per message."""
-    return {
+    out = {
         ch: {"default": channels.default_provider(ch), "available": channels.connected_providers(ch)}
         for ch in channels.CATALOG
     }
+    out["push"]["pushover_apps"] = [a["name"] for a in channels.pushover_apps() if a["set"]]
+    return out

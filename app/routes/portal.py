@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_303_SEE_OTHER
 from starlette.templating import Jinja2Templates
 
+from app import bootstrap
 from app.db import get_repository
 from app.db.base import DuplicateEmailError, DuplicateUserKeyError
 from app.services import access, message_log
@@ -51,6 +52,7 @@ def page_ctx(request: Request, account: dict[str, Any], active: str = "", **extr
         "user_name": account.get("name", ""), "user_email": account.get("email", ""),
         "user_key": account.get("user_key", ""), "is_owner": access.is_owner(account),
         "base_url": str(request.base_url).rstrip("/"),
+        "warn_not_persistent": not bootstrap.data_is_persistent(),
         **extra,
     }
 
@@ -179,7 +181,7 @@ def _get_active_apps(account: dict[str, Any]) -> Dict[str, dict[str, Any]]:
 @router.get("/gateway/login", response_class=HTMLResponse)
 def login_page(request: Request):
     if not access.has_accounts():
-        return _redirect("/gateway/register")  # fresh install: create the owner account first
+        return _redirect("/setup")  # fresh install: create the administrator in setup first
     return templates.TemplateResponse("gateway/login.html", _login_ctx(request))
 
 
@@ -241,39 +243,34 @@ def logout(request: Request):
 # ---------------------------------------------------------------------
 # REGISTER
 # ---------------------------------------------------------------------
-@router.get("/gateway/register", response_class=HTMLResponse)
-def register_page(request: Request):
-    if not access.signups_open():
-        return templates.TemplateResponse("gateway/register.html", {"request": request, "closed": True}, status_code=403)
-    return templates.TemplateResponse(
-        "gateway/register.html", {"request": request, "first_account": not access.has_accounts()}
-    )
+class AccountError(Exception):
+    """A validation problem with an account being created (safe to show the user)."""
+
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.message = message
+        self.status = status
 
 
-@router.post("/gateway/register", response_class=HTMLResponse)
-async def register_submit(request: Request):
-    if not access.signups_open():
-        return templates.TemplateResponse("gateway/register.html", {"request": request, "closed": True}, status_code=403)
-    first_account = not access.has_accounts()
-    form = await request.form()
-    name = str(form.get("name") or "").strip()
-    email = str(form.get("email") or "").strip().lower()
-    password = str(form.get("password") or "").strip()
-    password2 = str(form.get("password2") or "").strip()
-
+def create_account(name: str, email: str, password: str, password2: str, *, make_admin: bool) -> tuple[dict[str, Any], str, str]:
+    """Validate and create an account with its first API key and a login session.
+    Returns (account, raw_token, session_id). Used by the sign-up form and by the
+    first-run setup, so both apply the same rules."""
+    name = (name or "").strip()
+    email = (email or "").strip().lower()
+    password = (password or "").strip()
     if not name:
-        return templates.TemplateResponse("gateway/register.html", {"request": request, "error": "Name is required."}, status_code=400)
+        raise AccountError("Name is required.")
     if not email or "@" not in email:
-        return templates.TemplateResponse("gateway/register.html", {"request": request, "error": "Valid email is required."}, status_code=400)
+        raise AccountError("Valid email is required.")
     if not password:
-        return templates.TemplateResponse("gateway/register.html", {"request": request, "error": "Password is required."}, status_code=400)
-    if password != password2:
-        return templates.TemplateResponse("gateway/register.html", {"request": request, "error": "Passwords do not match."}, status_code=400)
-
+        raise AccountError("Password is required.")
+    if password != (password2 or "").strip():
+        raise AccountError("Passwords do not match.")
     try:
         pw_hash = hash_password(password)
     except ValueError as e:
-        return templates.TemplateResponse("gateway/register.html", {"request": request, "error": str(e)}, status_code=400)
+        raise AccountError(str(e))
 
     repo = _repo()
     last_err: Optional[Exception] = None
@@ -286,39 +283,54 @@ async def register_submit(request: Request):
         }
         try:
             account_id = repo.insert_account(doc)
-            if first_account:
-                access.claim_owner(account_id)
-            app = DEFAULT_TOKEN_APP
-            raw = generate_raw_token()
-            repo.push_token(account_id, _create_token_doc(raw, app))
-
-            sid = _create_session(account_id)
-            new_account = {**doc, "_id": account_id}
-            resp = templates.TemplateResponse(
-                "gateway/token_once.html",
-                page_ctx(request, new_account, "keys",
-                         warning="Here are the credentials for your first key, named 'default'.",
-                         raw_token=raw),
-            )
-            _set_session_cookie(resp, sid)
-            return resp
         except DuplicateEmailError:
-            return templates.TemplateResponse(
-                "gateway/register.html",
-                {"request": request, "error": "That email is already registered.", "name": name, "email": email},
-                status_code=409,
-            )
+            raise AccountError("That email is already registered.", 409)
         except DuplicateUserKeyError:
             continue
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             last_err = e
             break
+        if make_admin:
+            access.claim_owner(account_id)
+        raw = generate_raw_token()
+        repo.push_token(account_id, _create_token_doc(raw, DEFAULT_TOKEN_APP))
+        return {**doc, "_id": account_id}, raw, _create_session(account_id)
+    raise AccountError("Failed to create account." + (f" ({last_err})" if last_err else ""), 500)
 
-    return templates.TemplateResponse(
-        "gateway/register.html",
-        {"request": request, "error": "Failed to create account.", "debug": str(last_err) if last_err else ""},
-        status_code=500,
+
+@router.get("/gateway/register", response_class=HTMLResponse)
+def register_page(request: Request):
+    if not access.has_accounts():
+        return _redirect("/setup")  # the first (administrator) account is created in setup
+    if not access.signups_open():
+        return templates.TemplateResponse("gateway/register.html", {"request": request, "closed": True}, status_code=403)
+    return templates.TemplateResponse("gateway/register.html", {"request": request})
+
+
+@router.post("/gateway/register", response_class=HTMLResponse)
+async def register_submit(request: Request):
+    if not access.has_accounts():
+        return _redirect("/setup")
+    if not access.signups_open():
+        return templates.TemplateResponse("gateway/register.html", {"request": request, "closed": True}, status_code=403)
+    form = await request.form()
+    try:
+        account, raw, sid = create_account(
+            str(form.get("name") or ""), str(form.get("email") or ""),
+            str(form.get("password") or ""), str(form.get("password2") or ""), make_admin=False,
+        )
+    except AccountError as e:
+        return templates.TemplateResponse(
+            "gateway/register.html",
+            {"request": request, "error": e.message, "name": str(form.get("name") or ""), "email": str(form.get("email") or "")},
+            status_code=e.status,
+        )
+    resp = templates.TemplateResponse(
+        "gateway/token_once.html",
+        page_ctx(request, account, "keys", warning="Here are the credentials for your first key, named 'default'.", raw_token=raw),
     )
+    _set_session_cookie(resp, sid)
+    return resp
 
 
 @router.post("/gateway/services/message-gateway/tokens")

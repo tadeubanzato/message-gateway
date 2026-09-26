@@ -12,24 +12,18 @@ from app.db import get_repository
 from app.services.auth_tokens import hmac_token_hash_hex
 
 
-def require_api_key(
-    x_user_key: str | None = Header(default=None, alias="X-User-Key"),
-    x_api_token: str | None = Header(default=None, alias="X-API-Token"),
-) -> dict:
-    user_key = (x_user_key or "").strip()
-    raw_token = (x_api_token or "").strip()
-
+def authenticate(user_key: str | None, raw_token: str | None) -> dict | None:
+    """Validate an X-User-Key / X-API-Token pair. Returns the caller's identity
+    ({account_id, user_key, token_id}) or None. Used by the HTTP API and MCP."""
+    user_key = (user_key or "").strip()
+    raw_token = (raw_token or "").strip()
     if not user_key or not raw_token:
-        raise HTTPException(
-            status_code=HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized (missing X-User-Key or X-API-Token)",
-        )
+        return None
 
     token_hash = hmac_token_hash_hex(raw_token)
-    repo = get_repository()
-    account = repo.find_account_by_active_token_hash(user_key, token_hash)
+    account = get_repository().find_account_by_active_token_hash(user_key, token_hash)
     if not account:
-        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        return None
 
     token_id = None
     try:
@@ -46,3 +40,18 @@ def require_api_key(
         "user_key": account.get("user_key") or user_key,
         "token_id": token_id,
     }
+
+
+def require_api_key(
+    x_user_key: str | None = Header(default=None, alias="X-User-Key"),
+    x_api_token: str | None = Header(default=None, alias="X-API-Token"),
+) -> dict:
+    if not (x_user_key or "").strip() or not (x_api_token or "").strip():
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized (missing X-User-Key or X-API-Token)",
+        )
+    identity = authenticate(x_user_key, x_api_token)
+    if identity is None:
+        raise HTTPException(status_code=HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    return identity

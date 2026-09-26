@@ -44,8 +44,10 @@ class MessageRequest(BaseModel):
         if self.body is not None and body == "" and not template:
             raise ValueError("'body' must be non-empty")
 
-        if self.channel in ("sms", "email") and self.to is None:
-            raise ValueError("'to' is required for sms/email messages")
+        # Email always needs a recipient. SMS may omit it when a default phone number is
+        # set (enqueue_message fills it in, or rejects the message if there is none).
+        if self.channel == "email" and self.to is None:
+            raise ValueError("'to' is required for email messages")
 
         if self.channel == "email":
             if not (self.subject or "").strip():

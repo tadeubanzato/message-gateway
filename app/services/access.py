@@ -1,10 +1,11 @@
 """
 Who may do what in the portal.
 
-- The first account created is the OWNER. Only the owner can change settings.
-- Sign-ups are closed once an owner exists, unless the owner turns them on in
-  Settings. Databases created before owners were tracked treat the oldest
-  account as the owner.
+- The first account, created during setup, is the ADMINISTRATOR (stored internally
+  as the "owner"). Only the administrator can change settings and channels.
+- Sign-ups are closed once an administrator exists, unless the administrator turns
+  them on in Settings. Databases created before this was tracked explicitly treat
+  the oldest account as the administrator.
 """
 
 from __future__ import annotations
@@ -43,5 +44,5 @@ def has_accounts() -> bool:
 
 def signups_open() -> bool:
     if not has_accounts():
-        return True  # the very first account (the owner) can always be created
+        return True  # the very first account (the administrator) can always be created
     return (secret_store.get_setting(SIGNUPS_KEY) or "0") == "1"
