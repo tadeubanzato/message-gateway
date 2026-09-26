@@ -7,6 +7,11 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [0.2.0] - Unreleased
 
 ### Added
+- **Per-channel send endpoints** in the API reference, grouped Email / SMS / Push: plain and template
+  variants for email (`/v1/messages/email`, `/email/template`) and SMS (`/sms`, `/sms/template`), and
+  `/push`. Each has only its own fields and examples; the template endpoints document the
+  `{{ context.name }}` placeholders, `.txt`/`.html` files and strict missing-key errors.
+  `POST /v1/messages` still works but is no longer listed.
 - **Guided browser setup** at `http://localhost:8010`: choose local SQLite or
   MongoDB Atlas, then create the administrator account. No `.env` file needed.
 - `install.sh` one-command installer (checks Docker, builds, waits for healthy,
@@ -24,7 +29,8 @@ project uses [Semantic Versioning](https://semver.org/).
   Message log, API keys, About, and Account / Settings under the user menu.
   Shared stylesheet with light and dark themes.
 - Administrator role: the first account can change settings and channels; sign-ups
-  are closed by default and secret changes require the administrator's password.
+  are closed by default. Everything under Channels and Settings is administrator-only
+  (the logged-in session is enough; no password prompts).
 
 - **Pushover applications**: add any number of named apps, each with its own token,
   in the web app, plus a default app. Sends and MCP calls can name an `app`.
@@ -35,6 +41,18 @@ project uses [Semantic Versioning](https://semver.org/).
 - Sign-in and API-key links (open in a new tab) on every provider card.
 - MCP: `send_push`, `send_email`, `send_sms` and `send_test` tools that wait for and report the
   delivery result; free-form phone numbers are normalized (country code required).
+
+- **Guided channel pages**: choose a provider, then see only that provider's form; connected
+  providers show as compact cards with Send test, Make default, Edit and Remove.
+- One API reference (Scalar at `/scalar`), documenting only the send-message endpoint
+  (`POST /v1/messages`) with a login box for your key and ready-to-run examples. Swagger and ReDoc are gone; the portal's own
+  pages no longer clutter it.
+- **Change database** in Settings: move between SQLite and Atlas (or another Atlas database) with your
+  accounts, credentials and message history copied over, verified, and you stay signed in.
+- Every account carries a visible `role` (`admin` or `member`) in the database.
+- Saved credentials show their **last 4 characters** (`••••••••1a2b`) beside each field.
+- **Send test** goes through the real pipeline, so tests appear in the message log and
+  Home, labelled **Test** (with a Hide tests filter).
 
 ### Changed
 - `.env` is now optional and only for advanced overrides; every variable in

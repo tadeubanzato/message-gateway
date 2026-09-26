@@ -15,24 +15,24 @@ _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 
 class MessageRequest(BaseModel):
-    channel: Channel
-    to: Optional[Union[str, list[str]]] = None
-    subject: Optional[str] = None
-    body: Optional[str] = None
-    template: Optional[str] = None
-    emailType: Optional[EmailType] = None
-    context: dict[str, Any] = Field(default_factory=dict)
+    channel: Channel = Field(description="Where to send: `email`, `sms` or `push`.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Recipient(s). An email address for `email`; a phone number with country code, e.g. `+15551234567`, for `sms` (omit to use the default phone number); not needed for `push`. May be a list.")
+    subject: Optional[str] = Field(None, description="Required for `email`. Used as the title for `push`.")
+    body: Optional[str] = Field(None, description="The message text. Required unless `template` is given.")
+    template: Optional[str] = Field(None, description="Name of a server-side template to use instead of `body`.")
+    emailType: Optional[EmailType] = Field(None, description="`txt` (default) or `html`. Email only.")
+    context: dict[str, Any] = Field(default_factory=dict, description="Values for `{{context.key}}` placeholders in `body` or the template.")
 
     # Which connected provider to use (default: the channel's default provider)
-    provider: Optional[str] = None
+    provider: Optional[str] = Field(None, description="Which connected provider to use, e.g. `sendgrid`. Default: the channel's default provider.")
 
     # push-only fields (ignored by other channels)
-    app: Optional[str] = None
-    device: Optional[str] = None
-    url: Optional[str] = None
-    url_title: Optional[str] = None
+    app: Optional[str] = Field(None, description="Push (Pushover) only: which named app to send from. Default: the gateway's default app.")
+    device: Optional[str] = Field(None, description="Push only: send to a specific device name.")
+    url: Optional[str] = Field(None, description="Push only: a link to attach (http:// or https://).")
+    url_title: Optional[str] = Field(None, description="Push only: text for the attached link.")
 
-    meta: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict, description="Optional extra data stored with the message.")
 
     @model_validator(mode="after")
     def _validate_request(self) -> "MessageRequest":
@@ -97,6 +97,68 @@ class MessageRequest(BaseModel):
             seen.add(rr)
             out.append(rr)
         return out
+
+
+_PROVIDER_DESC = "Which connected provider to use. Default: the channel's default provider."
+_EMAIL_TEMPLATE_DESC = ("Name of a saved email template, e.g. `welcome`. Loads `<name>.txt`, or `<name>.html` when "
+                        "`emailType` is `html`, from `app/templates/email/`.")
+_SMS_TEMPLATE_DESC = "Name of a saved SMS template, e.g. `welcome`. Loads `<name>.txt` from `app/templates/sms/`."
+_CONTEXT_DESC = ("Values for the `{{ context.key }}` placeholders in the template. "
+                 "A placeholder with no matching key makes the request fail with a 400.")
+
+
+class _ChannelMessage(BaseModel):
+    """Base for the per-channel request bodies; converts to the internal MessageRequest."""
+    _channel: str = ""
+
+    def to_request(self) -> "MessageRequest":
+        return MessageRequest(channel=self._channel, **self.model_dump(exclude_none=True))
+
+
+class EmailMessage(_ChannelMessage):
+    _channel = "email"
+    to: Union[str, list[str]] = Field(description="Recipient email address, or a list of addresses.")
+    subject: str = Field(description="Subject line.")
+    body: str = Field(description="The message text.")
+    emailType: EmailType = Field("txt", description="`txt` (default) or `html`.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " E.g. `sendgrid`.")
+
+
+class EmailTemplateMessage(_ChannelMessage):
+    _channel = "email"
+    to: Union[str, list[str]] = Field(description="Recipient email address, or a list of addresses.")
+    subject: str = Field(description="Subject line. May contain `{{ context.key }}` placeholders.")
+    template: str = Field(description=_EMAIL_TEMPLATE_DESC)
+    context: dict[str, Any] = Field(default_factory=dict, description=_CONTEXT_DESC)
+    emailType: EmailType = Field("txt", description="`txt` (default) loads `<name>.txt`; `html` loads `<name>.html`.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " E.g. `sendgrid`.")
+
+
+class SmsMessage(_ChannelMessage):
+    _channel = "sms"
+    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number with country code, e.g. `+15551234567`, or a list. Omit to use the default phone number set in the web app.")
+    body: str = Field(description="The message text.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " E.g. `twilio`.")
+
+
+class SmsTemplateMessage(_ChannelMessage):
+    _channel = "sms"
+    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number with country code, e.g. `+15551234567`, or a list. Omit to use the default phone number set in the web app.")
+    template: str = Field(description=_SMS_TEMPLATE_DESC)
+    context: dict[str, Any] = Field(default_factory=dict, description=_CONTEXT_DESC)
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " E.g. `twilio`.")
+
+
+class PushMessage(_ChannelMessage):
+    _channel = "push"
+    body: str = Field(description="The message text.")
+    subject: Optional[str] = Field(None, description="Notification title.")
+    app: Optional[str] = Field(None, description="Pushover only: the **name** of one of your Pushover apps, as added in the web app under Channels > Push (e.g. `alerts`). This is the app's name, not its API token. Default: the default app. An unknown name returns a 400 listing the valid ones.")
+    device: Optional[str] = Field(None, description="Pushover only: deliver to one device by its Pushover device name. Default: all your devices.")
+    url: Optional[str] = Field(None, description="A link to attach (http:// or https://).")
+    url_title: Optional[str] = Field(None, description="Pushover only: text for the attached link.")
+    to: Optional[str] = Field(None, description="Override the recipient: a Pushover user or group key, or an ntfy topic. Default: the one saved in the web app.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " `pushover` or `ntfy`.")
 
 
 class MessageEnqueued(BaseModel):

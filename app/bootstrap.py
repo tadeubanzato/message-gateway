@@ -144,3 +144,9 @@ def data_is_persistent() -> bool:
         return os.path.ismount(DATA_DIR)
     except OSError:
         return False
+
+
+def db_env_locked() -> list[str]:
+    """Database settings pinned by an environment variable (the web app can't change those)."""
+    return [env for name, env in _ENV_OVERRIDES.items()
+            if name in ("db_backend", "mongodb_uri", "mongodb_db") and (os.environ.get(env) or "").strip()]

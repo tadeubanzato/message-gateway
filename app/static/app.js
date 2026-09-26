@@ -42,7 +42,7 @@
     go.onclick = function () {
       go.disabled = true; go.textContent = "Sending…";
       post("/gateway/channels/" + channel + "/test", { provider: sel.value, to: needsTo ? to.value : null, app: (channel === "push" && sel.value === "pushover" && usable.length > 1) ? appSel.value : null })
-        .then(function (r) { say(out, r.ok ? "Sent. Check your device or inbox." : (r.error || "Send failed."), r.ok ? "ok" : "err"); })
+        .then(function (r) { say(out, r.ok ? (r.note || "Delivered. Check your device or inbox. It's also in the Message log, marked Test.") : (r.error || "Send failed."), r.ok ? "ok" : "err"); })
         .catch(function (e) { say(out, e.message, "err"); })
         .then(function () { go.disabled = false; go.textContent = "Send test"; });
     };

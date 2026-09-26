@@ -151,6 +151,17 @@ class SqliteRepository(Repository):
             raise
         return account_id
 
+    def list_accounts(self) -> list[dict[str, Any]]:
+        return [json.loads(r[0]) for r in self._conn().execute("SELECT doc FROM accounts").fetchall()]
+
+    def update_account_fields(self, account_id: str, fields: dict[str, Any]) -> None:
+        row = self._conn().execute("SELECT doc FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        if not row:
+            return
+        doc = {**json.loads(row[0]), **fields}
+        self._conn().execute("UPDATE accounts SET doc = ? WHERE id = ?", (json.dumps(doc, default=_json_default), account_id))
+        self._conn().commit()
+
     def count_accounts(self) -> int:
         return int(self._conn().execute("SELECT COUNT(*) FROM accounts").fetchone()[0])
 
@@ -339,6 +350,48 @@ class SqliteRepository(Repository):
     def delete_setting(self, name: str) -> None:
         self._conn().execute("DELETE FROM settings WHERE name = ?", (name,))
         self._conn().commit()
+
+    # ---- move data to another database ----
+    def export_data(self) -> dict[str, list[dict[str, Any]]]:
+        c = self._conn()
+
+        def rows(sql: str):
+            return c.execute(sql).fetchall()
+
+        return {
+            "accounts": [json.loads(r[0]) for r in rows("SELECT doc FROM accounts")],
+            "portal_sessions": [json.loads(r[0]) for r in rows("SELECT doc FROM portal_sessions")],
+            "messages": [{**json.loads(r[0]), "_created_at": r[1]} for r in rows("SELECT doc, created_at FROM messages")],
+            "attempts": [{**json.loads(r[0]), "_created_at": r[1]} for r in rows("SELECT doc, created_at FROM attempts")],
+            "settings": [{"_id": r[0], **json.loads(r[1])} for r in rows("SELECT name, doc FROM settings")],
+        }
+
+    def import_data(self, data: dict[str, list[dict[str, Any]]]) -> None:
+        c = self._conn()
+        dump = lambda d: json.dumps(d, default=_json_default)  # noqa: E731
+        for d in data.get("accounts", []):
+            d = {**d, "_id": str(d["_id"])}
+            c.execute("INSERT OR IGNORE INTO accounts (id, email, user_key, doc) VALUES (?, ?, ?, ?)",
+                      (d["_id"], d["email"], d["user_key"], dump(d)))
+        for d in data.get("portal_sessions", []):
+            c.execute("INSERT OR IGNORE INTO portal_sessions (session_id, doc) VALUES (?, ?)", (d["session_id"], dump(d)))
+        for d in data.get("messages", []):
+            d = dict(d); created = d.pop("_created_at", None) or _now(); d.pop("_id", None)
+            c.execute("INSERT OR IGNORE INTO messages (message_id, created_at, channel, status, doc) VALUES (?, ?, ?, ?, ?)",
+                      (d["message_id"], created, d.get("channel"), d.get("status", "queued"), dump(d)))
+        for d in data.get("attempts", []):
+            d = dict(d); created = d.pop("_created_at", None) or _now(); aid = str(d.pop("_id", None) or uuid.uuid4())
+            c.execute("INSERT OR IGNORE INTO attempts (id, message_id, created_at, doc) VALUES (?, ?, ?, ?)",
+                      (aid, d["message_id"], created, dump({**d, "_id": aid})))
+        for d in data.get("settings", []):
+            d = dict(d); name = d.pop("_id")
+            c.execute("INSERT OR REPLACE INTO settings (name, doc) VALUES (?, ?)", (name, dump(d)))
+        c.commit()
+
+    def counts(self) -> dict[str, int]:
+        c = self._conn()
+        return {t: int(c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
+                for t in ("accounts", "portal_sessions", "messages", "attempts", "settings")}
 
     # ---- lifecycle ----
     def ensure_indexes(self) -> None:

@@ -86,14 +86,15 @@ You land on the **Home** page, which shows each channel's status. Next, connect 
 
 ## 3. Connect your channels
 
-Open **Channels** in the top menu (administrator only) and choose Email, SMS or Push. Each
-provider is a card with links (opening in a new tab) to sign in and find your keys. Fill in
-the fields, enter your password to confirm, and click **Connect**. The gateway checks the
+Open **Channels** in the top menu (administrator only) and choose Email, SMS or Push. Pick your
+provider (for example Pushover), and you see only that provider's form, with links (opening in a
+new tab) to sign in and find your keys. Fill in the fields and click **Connect**. The gateway checks the
 credentials, then **Send test** lets you confirm a real message arrives.
 
-You can connect several providers on one channel. One is the **default**; click **Make
-default** to change it. Saved secrets are never shown again: type a new value to replace one,
-or leave the field blank to keep it.
+You can connect several providers on one channel: use **+ Add another provider**. One is the
+**default**; click **Make default** to change it. Saved secrets are never shown again, but the last 4 characters appear beside each field
+(`••••••••1a2b`) so you can compare with the key in your provider's dashboard. Type a new
+value to replace one, or leave the field blank to keep it.
 
 ### Email
 
@@ -146,11 +147,11 @@ country code required). It is used whenever a message doesn't say who to text.
 | **Pushover** | Your user key, plus one or more **applications** (below) |
 | **ntfy** | A topic name (pick a long, hard-to-guess one) and optionally a server URL. Free, no account. Subscribe to the topic in the ntfy app |
 
-**Pushover applications.** Each Pushover application has its own API token (create them at
-pushover.net/apps/build). On the Pushover card, click **+ Add application** for each one:
-give it any name you like, paste its token, and mark one as the **default**. Use the name as
-`"app"` when sending; messages that name no app use the default. Names may contain letters,
-numbers, dots, dashes and underscores. Tokens are stored encrypted, in this form:
+**Pushover.** The form is short: your **user key**, your **default app** (a name and its API token),
+and a **+ Add another app** button for more. Create each app at pushover.net/apps/build. Give an
+app any name you like and use it as `"app"` when sending; messages that name no app use the
+default app. On an extra app, **Make default** swaps it into the default slot. Names may contain
+letters, numbers, dots, dashes and underscores. Tokens are stored encrypted, in this form:
 
 ```
 PUSHOVER_APPS=alerts:PUSHOVER_APPTOKEN_ALERTS,backups:PUSHOVER_APPTOKEN_BACKUPS
@@ -158,7 +159,12 @@ PUSHOVER_APPS=alerts:PUSHOVER_APPTOKEN_ALERTS,backups:PUSHOVER_APPTOKEN_BACKUPS
 
 ## 4. Send your first message
 
-Create keys on the **API keys** page (one per program that sends), then:
+Every request needs two headers: `X-User-Key` (your account, `gw_user_...`, never changes) and
+`X-API-Token` (the secret for one key, `gw_tok_...`). Get both from the web app: sign in, open
+**API keys**, copy your user key, create a key (one per program that sends) and copy its token
+straight away, because **it is shown only once** and only a hash is stored. Lost it? Click
+**Replace token**; the old one stops working immediately. There is no login call: the headers go on
+every request, and a wrong or revoked pair gets a `401`. Then:
 
 ```bash
 curl -X POST http://localhost:8010/v1/messages \
@@ -170,7 +176,7 @@ curl -X POST http://localhost:8010/v1/messages \
 
 | Channel | Fields |
 |---|---|
-| `push` | `body`; optional `subject` (title), `app`, `device`, `url`, `url_title` |
+| `push` | `body`; optional `subject` (title), `app` (Pushover app **name**), `device`, `url`, `url_title`, `to` |
 | `email` | `to`, `subject`, `body`; optional `emailType` (`txt` or `html`) |
 | `sms` | `body`; `to`, or omit it to use the default phone number |
 
@@ -178,13 +184,43 @@ Every channel also accepts:
 
 - **`provider`**: pick a connected provider for this message, e.g. `"provider": "sendgrid"`.
   Without it the channel's default is used.
-- **`template` + `context`**: use a server-side template instead of `body`.
+- **`template` + `context`** (email and SMS): use a saved template instead of `body`. See below.
+
+### Templates (email and SMS)
+
+Templates are plain files you keep in `app/templates/email/` (`<name>.txt` and/or `<name>.html`) and
+`app/templates/sms/` (`<name>.txt`). A template uses `{{ context.key }}` placeholders:
+
+```
+Hi {{ context.name }}, welcome! Your account is now active.
+```
+
+Send it by name, with the values in `context`:
+
+```json
+{ "to": "+15551234567", "template": "welcome", "context": { "name": "Ana" } }
+```
+
+Ana receives: `Hi Ana, welcome! Your account is now active.`
+
+For email, the same idea with a subject (placeholders work there too):
+
+```json
+{ "to": "ana@example.com", "subject": "Welcome, {{ context.name }}", "template": "welcome", "context": { "name": "Ana" } }
+```
+
+Ana receives the subject `Welcome, Ana` and the `welcome.txt` body with her name filled in. Add
+`"emailType": "html"` to use `welcome.html` instead.
+
+- **Email**: `emailType` picks the file (`html` uses `<name>.html`, otherwise `<name>.txt`), so provide
+  both files if you send both. Placeholders also work in `subject`.
+- **Strict by default**: a placeholder with no value in `context` returns a 400. Set
+  `TEMPLATE_STRICT=false` to fill it with an empty string instead. An unknown template name is a 400.
+- The folders are mounted into the container, so new templates are picked up without a rebuild.
+- Push notifications don't use templates; send `body` directly.
 
 `to` may be a list. If nothing is connected for the channel, the API answers immediately with
 a clear error instead of queueing a message that can't be delivered.
-
-Other endpoints: `GET /v1/providers` (what you can use), `GET /v1/messages` (your log),
-`GET /v1/messages/{id}` (one message with its delivery attempts).
 
 ## 5. Connect an AI agent (MCP)
 
@@ -224,6 +260,8 @@ Provider credentials are never handled through MCP: they are entered in the web 
 
 - **Home**: channel status, recent messages, a copyable send example.
 - **Message log**: search and filter everything sent; click a message for its delivery attempts.
+  Messages sent with **Send test** are logged too, with a small **Test** label, and a
+  **Hide tests** filter.
 - **API keys**: create, replace or delete keys. A replaced token stops working immediately.
 - **Settings** (user menu, administrator): keep or drop message content, allow sign-ups, import an old `.env`.
 - **Account** (user menu): your profile and password.
@@ -244,8 +282,8 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
   no login. To reach it from other machines, change the port mapping in `docker-compose.yml`
   *after* setup, and put it behind HTTPS.
 - **Administrator vs members.** The first account is the administrator. Sign-ups are off by
-  default. Members can send messages but can't change settings. Changing credentials asks for
-  the administrator's password again.
+  default. Members can send messages but can't change settings. Everything under Channels and
+  Settings requires the administrator's login session.
 - **Back up your data.** With local storage, your database *and the key that decrypts your
   saved credentials* live in the `gateway_data` Docker volume. Back it up with
   `docker compose cp gateway:/app/data ./gateway-backup` and keep that copy private. If the
@@ -283,9 +321,8 @@ then can't change it (the Channels page tells you when that happens).
 
 ### API documentation
 
-- Interactive: `http://localhost:8010/scalar`
-- Swagger: `http://localhost:8010/docs`
-- The **About** page in the app lists the main endpoints.
+The API reference is at **`http://localhost:8010/scalar`** (also linked from the **About** page). Click
+**Authenticate** to enter your user key and API token, then use **Test Request** on the send endpoint.
 
 ### Architecture
 

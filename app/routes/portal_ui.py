@@ -2,8 +2,7 @@
 Portal pages after login: Home, Message log, API keys, Settings, About, Account.
 
 All pages share gateway/base.html (navbar + /static/app.css). Settings is
-administrator-only, and every change to credentials or general options requires
-the administrator's password again.
+administrator-only (the logged-in session is enough; no password is asked again).
 """
 
 from __future__ import annotations
@@ -20,7 +19,8 @@ from app.routes.portal import (
     _get_active_apps, _iso, _redirect, _require_account_or_redirect,
     _load_account_from_session, page_ctx, templates,
 )
-from app.services import access, channels, message_log, secret_store
+from app.services import access, channels, db_switch, dispatch, message_log, secret_store
+from app.services.phone import normalize_phone
 from app.services.auth_passwords import hash_password, verify_password
 from app.version import APP_VERSION
 
@@ -86,6 +86,7 @@ def messages_page(request: Request):
     channel = (qp.get("channel") or "").strip() or None
     status = (qp.get("status") or "").strip() or None
     q = (qp.get("q") or "").strip()
+    hide_tests = qp.get("tests") == "hide"
     try:
         limit = max(100, min(int(qp.get("limit") or 100), 1000))
     except ValueError:
@@ -99,10 +100,12 @@ def messages_page(request: Request):
             m for m in msgs
             if any(needle in str(m.get(k) or "").lower() for k in ("to", "subject", "body", "message_id"))
         ]
+    if hide_tests:
+        msgs = [m for m in msgs if not m.get("is_test")]
     more = len(msgs) > limit
     return templates.TemplateResponse("gateway/messages.html", page_ctx(
         request, account, "messages", messages=msgs[:limit], more=more, limit=limit,
-        q=q, channel=channel or "", status=status or "",
+        q=q, channel=channel or "", status=status or "", hide_tests=hide_tests,
         content_enabled=message_log.store_content_enabled(),
     ))
 
@@ -183,15 +186,13 @@ async def change_password(request: Request):
 # ---------------------------------------------------------------------
 # Administrator-only helpers
 # ---------------------------------------------------------------------
-def _owner_or_error(request: Request, password: Optional[str] = None) -> dict[str, Any]:
-    """Session must belong to the administrator; when `password` is given it must match."""
+def _owner_or_error(request: Request) -> dict[str, Any]:
+    """The logged-in session must belong to the administrator."""
     account = _load_account_from_session(request)
     if not account:
         raise HTTPException(status_code=401, detail="Please log in again.")
     if not access.is_owner(account):
         raise HTTPException(status_code=403, detail="Only an administrator can change settings.")
-    if password is not None and not verify_password(password or "", account.get("password_hash", "")):
-        raise HTTPException(status_code=400, detail="That password is incorrect.")
     return account
 
 
@@ -236,7 +237,6 @@ class AppItem(BaseModel):
 class SaveBody(BaseModel):
     provider: str
     values: dict[str, str] = Field(default_factory=dict)
-    password: str = ""
     make_default: Optional[bool] = None
     apps: Optional[list[AppItem]] = None      # Pushover: the complete list of named apps
     default_app: Optional[str] = None
@@ -244,7 +244,6 @@ class SaveBody(BaseModel):
 
 class ProviderBody(BaseModel):
     provider: str
-    password: str = ""
 
 
 class TestBody(BaseModel):
@@ -261,7 +260,7 @@ def _known_channel(channel: str) -> None:
 @router.post("/gateway/channels/{channel}/save", include_in_schema=False)
 def channel_save(request: Request, channel: str, body: SaveBody):
     _known_channel(channel)
-    _owner_or_error(request, body.password)
+    _owner_or_error(request)
     result = channels.apply_provider(
         channel, body.provider, body.values, body.make_default,
         apps=[a.model_dump() for a in body.apps] if body.apps is not None else None,
@@ -274,7 +273,7 @@ def channel_save(request: Request, channel: str, body: SaveBody):
 @router.post("/gateway/channels/{channel}/default", include_in_schema=False)
 def channel_default(request: Request, channel: str, body: ProviderBody):
     _known_channel(channel)
-    _owner_or_error(request, body.password)
+    _owner_or_error(request)
     result = channels.set_default(channel, body.provider)
     result["status"] = channels.channel_status(channel)
     return result
@@ -283,7 +282,7 @@ def channel_default(request: Request, channel: str, body: ProviderBody):
 @router.post("/gateway/channels/{channel}/remove", include_in_schema=False)
 def channel_remove(request: Request, channel: str, body: ProviderBody):
     _known_channel(channel)
-    _owner_or_error(request, body.password)
+    _owner_or_error(request)
     result = channels.remove_provider(channel, body.provider)
     result["status"] = channels.channel_status(channel)
     return result
@@ -291,13 +290,12 @@ def channel_remove(request: Request, channel: str, body: ProviderBody):
 
 class DefaultsBody(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
-    password: str = ""
 
 
 @router.post("/gateway/channels/{channel}/defaults", include_in_schema=False)
 def channel_defaults_save(request: Request, channel: str, body: DefaultsBody):
     _known_channel(channel)
-    _owner_or_error(request, body.password)
+    _owner_or_error(request)
     result = channels.save_defaults(channel, body.values)
     result["status"] = channels.channel_status(channel)
     return result
@@ -306,8 +304,25 @@ def channel_defaults_save(request: Request, channel: str, body: DefaultsBody):
 @router.post("/gateway/channels/{channel}/test", include_in_schema=False)
 def channel_test(request: Request, channel: str, body: TestBody):
     _known_channel(channel)
-    _owner_or_error(request)
-    return channels.send_test(channel, body.to, body.provider, body.app)
+    account = _owner_or_error(request)
+    to = (body.to or "").strip() or None
+    if channel == "email" and not to:
+        to = account.get("email")                       # "send me a test": default to the administrator's own address
+    if channel == "sms" and not to and not channels.default_sms_number():
+        return {"ok": False, "error": "Enter a phone number to send the test to, or set a default phone number on this page."}
+    if channel == "sms" and to:
+        try:
+            to = normalize_phone(to)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+    try:
+        req = dispatch.build_test_request(channel, to, body.provider, body.app)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    result = dispatch.send_and_wait(req, str(account["_id"]), wait_seconds=10)
+    if result.get("status") == "queued":
+        return {"ok": True, "note": "Sent. It is still being delivered; check the message log."}
+    return {"ok": bool(result.get("ok")), "error": channels.friendly(result.get("error")) if not result.get("ok") else None}
 
 
 # ---------------------------------------------------------------------
@@ -326,7 +341,7 @@ def settings_page(request: Request):
     except Exception:
         db_ok = False
     return templates.TemplateResponse("gateway/settings.html", page_ctx(
-        request, account, "settings", backend=backend_name(), db_ok=db_ok,
+        request, account, "settings", backend=backend_name(), db_ok=db_ok, db=db_switch.describe_current(),
         store_content=message_log.store_content_enabled(),
         allow_signups=(secret_store.get_setting(access.SIGNUPS_KEY) or "0") == "1",
     ))
@@ -335,17 +350,35 @@ def settings_page(request: Request):
 class GeneralBody(BaseModel):
     store_content: bool
     allow_signups: bool
-    password: str = ""
+
+
+class DbTarget(BaseModel):
+    backend: str
+    mongodb_uri: str = ""
+    mongodb_db: str = "relay_gateway"
+    copy: bool = True
+    use_existing: bool = False
+
+
+@router.post("/gateway/settings/database/check", include_in_schema=False)
+def settings_database_check(request: Request, body: DbTarget):
+    _owner_or_error(request)
+    return db_switch.check_target(body.backend, body.mongodb_uri, body.mongodb_db)
+
+
+@router.post("/gateway/settings/database/switch", include_in_schema=False)
+def settings_database_switch(request: Request, body: DbTarget):
+    _owner_or_error(request)
+    return db_switch.switch_database(body.backend, body.mongodb_uri, body.mongodb_db, body.copy, body.use_existing)
 
 
 class ImportBody(BaseModel):
     text: str
-    password: str = ""
 
 
 @router.post("/gateway/settings/import", include_in_schema=False)
 def settings_import(request: Request, body: ImportBody):
-    _owner_or_error(request, body.password)
+    _owner_or_error(request)
     if len(body.text) > 200_000:
         raise HTTPException(status_code=400, detail="That file is too large to be a .env file.")
     return channels.import_env_text(body.text)
@@ -353,7 +386,7 @@ def settings_import(request: Request, body: ImportBody):
 
 @router.post("/gateway/settings/general", include_in_schema=False)
 def settings_general(request: Request, body: GeneralBody):
-    _owner_or_error(request, body.password)
+    _owner_or_error(request)
     secret_store.set_setting("STORE_MESSAGE_CONTENT", "1" if body.store_content else "0")
     secret_store.set_setting(access.SIGNUPS_KEY, "1" if body.allow_signups else "0")
     return {"ok": True}

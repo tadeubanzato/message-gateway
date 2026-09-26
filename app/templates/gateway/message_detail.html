@@ -2,7 +2,7 @@
 {% block title %}Message Gateway - Message{% endblock %}
 {% block content %}
 <p class="muted"><a href="/gateway/messages">← Message log</a></p>
-<div class="row between"><h1 style="margin:0">Message</h1><span class="badge {{ m.status }}">{{ m.status }}</span></div>
+<div class="row between"><h1 style="margin:0">Message{% if m.is_test %}<span class="badge test">Test</span>{% endif %}</h1><span class="badge {{ m.status }}">{{ m.status }}</span></div>
 <p class="sub"><code>{{ m.message_id }}</code></p>
 
 <div class="card">

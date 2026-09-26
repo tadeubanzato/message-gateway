@@ -30,6 +30,7 @@ CATALOG: dict[str, dict[str, Any]] = {
         "providers": {
             "mailjet": {
                 "label": "Mailjet",
+                "blurb": 'Email delivery API with a free tier. Needs a verified sender address.',
                 "links": [{"label": "Sign in to Mailjet", "url": "https://app.mailjet.com/signin"}, {"label": "Open your API keys", "url": "https://app.mailjet.com/account/apikeys"}],
                 "help": "Account settings → REST API → API Key Management (mailjet.com).",
                 "fields": [
@@ -41,6 +42,7 @@ CATALOG: dict[str, dict[str, Any]] = {
             },
             "sendgrid": {
                 "label": "SendGrid",
+                "blurb": 'Email delivery API from Twilio. Needs a verified sender address.',
                 "links": [{"label": "Sign in to SendGrid", "url": "https://app.sendgrid.com/login"}, {"label": "Open your API keys", "url": "https://app.sendgrid.com/settings/api_keys"}],
                 "help": "Settings → API Keys (sendgrid.com). The from address must be a verified sender.",
                 "fields": [
@@ -57,6 +59,7 @@ CATALOG: dict[str, dict[str, Any]] = {
         "providers": {
             "twilio": {
                 "label": "Twilio",
+                "blurb": 'Text messages to most countries. Needs a Twilio phone number.',
                 "links": [{"label": "Sign in to Twilio", "url": "https://www.twilio.com/login"}, {"label": "Open the Twilio console", "url": "https://console.twilio.com/"}],
                 "help": "Console home shows the Account SID and Auth Token (twilio.com/console).",
                 "fields": [
@@ -67,6 +70,7 @@ CATALOG: dict[str, dict[str, Any]] = {
             },
             "infobip": {
                 "label": "Infobip",
+                "blurb": 'Global SMS and messaging platform.',
                 "links": [{"label": "Sign in to Infobip", "url": "https://portal.infobip.com/login"}, {"label": "Open your API keys", "url": "https://portal.infobip.com/dev/api-keys"}],
                 "help": "API key and base URL are in your Infobip portal under Developers.",
                 "fields": [
@@ -77,6 +81,7 @@ CATALOG: dict[str, dict[str, Any]] = {
             },
             "custom_http": {
                 "label": "Custom HTTP endpoint (your own SMS service)",
+                "blurb": 'Use your own SMS service or modem. You set the URL and the JSON it expects.',
                 "help": (
                     "Send through your own SMS service, such as an SMS box or modem API on your network. "
                     "Give the endpoint address and a sample JSON body; the gateway sends every message in that "
@@ -108,8 +113,9 @@ CATALOG: dict[str, dict[str, Any]] = {
         "providers": {
             "pushover": {
                 "label": "Pushover",
+                "blurb": 'Push notifications to your phone or desktop. Needs a Pushover account.',
                 "links": [{"label": "Sign in to Pushover", "url": "https://pushover.net/login"}, {"label": "Create an application", "url": "https://pushover.net/apps/build"}],
-                "help": "User key: your pushover.net dashboard. Applications: create each one at pushover.net/apps/build and add its API token below.",
+                "help": "Enter your Pushover user key (shown on your pushover.net dashboard), then the API token of your default app. Use + to add more apps.",
                 "fields": [
                     {"name": "PUSHOVER_USER_KEY", "label": "User key", "secret": True},
                 ],
@@ -117,6 +123,7 @@ CATALOG: dict[str, dict[str, Any]] = {
             },
             "ntfy": {
                 "label": "ntfy (free, no account)",
+                "blurb": 'Free push notifications with no account. Works with the ntfy app.',
                 "links": [{"label": "Open ntfy", "url": "https://ntfy.sh/app"}, {"label": "ntfy documentation", "url": "https://docs.ntfy.sh/"}],
                 "help": "Pick a long, hard-to-guess topic name and subscribe to it in the ntfy app.",
                 "fields": [
@@ -200,7 +207,7 @@ def pushover_apps() -> list[dict[str, Any]]:
     chosen = (get_env("PUSHOVER_DEFAULT_APP") or "").strip().lower()
     default = chosen if chosen in mapping else ("default" if "default" in mapping else next(iter(mapping), ""))
     return [
-        {"name": n, "set": is_field_set(env), "is_default": n == default}
+        {"name": n, "set": is_field_set(env), "is_default": n == default, "last4": mask_tail(get_env(env))}
         for n, env in mapping.items()
     ]
 
@@ -294,6 +301,13 @@ def save_defaults(channel: str, values: dict[str, str]) -> dict[str, Any]:
     return {"ok": True}
 
 
+def mask_tail(value: Optional[str]) -> Optional[str]:
+    """Last 4 characters of a saved credential, so it can be compared with the one in the
+    provider's dashboard. Short secrets show nothing, so a short secret is never mostly revealed."""
+    v = (value or "").strip()
+    return v[-4:] if len(v) >= 12 else None
+
+
 def default_provider(channel: str) -> str:
     spec = CATALOG[channel]
     return (get_env(spec["selector"], DEFAULT_PROVIDER[channel]) or DEFAULT_PROVIDER[channel]).strip().lower()
@@ -326,7 +340,8 @@ def provider_status(channel: str, provider: str) -> dict[str, Any]:
         "is_default": provider == default_provider(channel),
         "fields": [
             {"name": f["name"], "set": is_field_set(f["name"]),
-             "value": None if f.get("secret") else (get_env(f["name"]) or "")}
+             "value": None if f.get("secret") else (get_env(f["name"]) or ""),
+             "last4": mask_tail(get_env(f["name"])) if f.get("secret") else None}
             for f in info["fields"]
         ],
         "env_locked": env_locked([f["name"] for f in info["fields"]] + (["PUSHOVER_APPS"] if info.get("apps") else [])),
@@ -449,30 +464,6 @@ def remove_provider(channel: str, provider: str) -> dict[str, Any]:
         else:
             secret_store.delete_setting(spec["selector"])
     return {"ok": True}
-
-
-def send_test(channel: str, to: Optional[str], provider_name: Optional[str] = None,
-              app: Optional[str] = None) -> dict[str, Any]:
-    if channel not in CATALOG:
-        return {"ok": False, "error": "Unknown channel."}
-    try:
-        provider = CATALOG[channel]["getter"](provider_name)
-        text = "Test message from your Message Gateway. It works!"
-        if channel == "push":
-            r = provider.send(body=text, title="Message Gateway", app=(app or None))
-        elif channel == "email":
-            if not (to or "").strip():
-                return {"ok": False, "error": "Enter an email address to send the test to."}
-            r = provider.send(to=to.strip(), subject="Message Gateway test", body=text, email_type="txt")
-        else:
-            if not (to or "").strip():
-                return {"ok": False, "error": "Enter a phone number to send the test to."}
-            r = provider.send(to=to.strip(), body=text, message_id=str(uuid.uuid4()))
-    except SystemExit as e:
-        return {"ok": False, "error": str(e)}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"Send failed ({type(e).__name__})."}
-    return {"ok": bool(r.ok), "error": friendly(r.error)}
 
 
 # ---------------------------------------------------------------------

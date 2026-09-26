@@ -6,16 +6,11 @@
 <p class="sub" id="chSummary"></p>
 
 {% if unreadable %}
-<div class="msg err" style="margin:0 0 14px"><b>{{ unreadable }} saved credential{{ '' if unreadable == 1 else 's' }} can't be read.</b> The encryption key changed (for example the data volume was replaced while the database was kept). Enter the affected credentials again below. Old API tokens may also need to be recreated.</div>
+<div class="msg err" style="margin:0 0 14px"><b>{{ unreadable }} saved credential{{ '' if unreadable == 1 else 's' }} can't be read.</b> The encryption key changed (for example the data volume was replaced while the database was kept). Enter the affected credentials again. Old API tokens may also need to be recreated.</div>
 {% endif %}
-<div class="card">
-  <h3>Choosing a provider per message</h3>
-  <p class="muted" style="margin:0 0 8px">Messages use the default provider unless the API call names another connected one:</p>
-  <pre style="margin:0"><code>{"channel": "{{ ch.channel }}", ... , "provider": "<span id="exProv">{{ (ch.connected | map(attribute='name') | list)[0] if ch.connected else 'provider-name' }}</span>"}</code></pre>
-</div>
 
-<div id="defaults"></div>
-<div id="providers"></div>
+<div id="flash"></div>
+<div id="main"></div>
 {% endblock %}
 {% block scripts %}
 <script id="data" type="application/json">{{ payload | tojson }}</script>
@@ -26,165 +21,247 @@
   const { post, say } = window.MG;
   const STATE = { ready: "Ready", needs_attention: "Needs attention", not_set_up: "Not set up" };
   let status = D.status;
+  // What the page is showing: the list of connected providers, or the "add a provider" flow.
+  const ui = { adding: false, chosen: null, editing: null, flash: null };
+
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const providerLabel = (name) => SPEC.providers[name].label;
 
   function header() {
     $("#chBadge").className = "badge " + status.state; $("#chBadge").textContent = STATE[status.state];
-    $("#chSummary").textContent = status.state === "not_set_up" ? "No provider connected yet. Add one below to start sending."
-      : status.state === "ready" ? "Messages go through " + status.default_label + " unless the call picks another connected provider."
-      : "The default provider (" + status.default_label + ") isn't connected. Connect it or make another provider the default.";
-    if (status.connected.length) $("#exProv").textContent = status.connected[0].name;
+    $("#chSummary").textContent = status.state === "not_set_up" ? "Not connected yet. Choose a provider to start sending " + LABEL.toLowerCase() + "."
+      : status.state === "ready" ? "Messages go through " + status.default_label + (status.connected.length > 1 ? " unless a message picks another connected provider." : ".")
+      : "The default provider (" + status.default_label + ") isn't connected. Make a connected provider the default, or connect it.";
   }
 
-  function card(p) {
+  // One line saying what a connected provider is set up with (never a secret).
+  function summarize(p) {
+    if (p.apps && p.apps.length) {
+      const usable = p.apps.filter(a => a.set), d = usable.find(a => a.is_default);
+      return usable.length + " application" + (usable.length === 1 ? "" : "s") + (d ? ", default: " + d.name : "") + " (" + usable.map(a => a.name).join(", ") + ")";
+    }
+    const val = (suffix) => { const f = p.fields.find(x => x.name.endsWith(suffix) && x.value); return f ? f.value : null; };
+    return (val("FROM_EMAIL") && "Sends from " + val("FROM_EMAIL")) || (val("FROM_NUMBER") && "Sends from " + val("FROM_NUMBER")) ||
+      (val("_TOPIC") && "Topic: " + val("_TOPIC")) || (val("SMS_URL") && "Endpoint: " + val("SMS_URL")) || (val("INFOBIP_FROM") && "Sender: " + val("INFOBIP_FROM")) || "Credentials saved";
+  }
+
+  // ---------------- the setup form for ONE provider ----------------
+  function formFor(p, { isNew, onCancel }) {
     const spec = SPEC.providers[p.name];
-    const el = document.createElement("div"); el.className = "pcard" + (p.is_default && p.connected ? " is-default" : ""); el.id = p.name;
-    el.innerHTML = `<div class="row between"><h3>${spec.label}</h3><span class="row" style="gap:6px" data-badges></span></div>
-      <p class="help" style="margin:6px 0 0" data-help></p>
+    const root = el("div");
+    root.innerHTML = `<p class="help" style="margin:0" data-help></p>
       <div class="row" data-links style="gap:14px;margin:6px 0 0"></div>
       <div data-fields></div>
-      <label>Your password (to confirm changes)</label><input type="password" data-pw autocomplete="current-password" style="max-width:300px" />
       <div class="actions" data-actions></div><div data-out></div>`;
-    $("[data-help]", el).textContent = spec.help;
+    $("[data-help]", root).textContent = spec.help;
     for (const l of (spec.links || [])) {   // sign-in / API-key pages open in a new tab
-      const a = document.createElement("a"); a.href = l.url; a.target = "_blank"; a.rel = "noopener noreferrer";
-      a.textContent = l.label + " ↗"; a.style.fontSize = "13px"; $("[data-links]", el).appendChild(a);
+      const a = el("a", "", l.label + " ↗"); a.href = l.url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.style.fontSize = "13px";
+      $("[data-links]", root).appendChild(a);
     }
     const state = Object.fromEntries(p.fields.map(f => [f.name, f]));
-    const fields = $("[data-fields]", el);
+    const fields = $("[data-fields]", root);
     const renderPreview = (text) => {
       const sample = { to: "+15551234567", to_digits: "15551234567", message: "Hello from Message Gateway", message_id: "abc123" };
       const fill = (v) => typeof v === "string" ? v.replace(/\{\{\s*(to_digits|to|message_id|message)\s*\}\}/g, (m, k) => sample[k])
         : Array.isArray(v) ? v.map(fill) : (v && typeof v === "object") ? Object.fromEntries(Object.entries(v).map(([k, x]) => [fill(k), fill(x)])) : v;
       try { return JSON.stringify(fill(JSON.parse(text)), null, 2); } catch (e) { return "Not valid JSON yet: " + e.message; }
     };
+    if (p.env_locked && p.env_locked.length) {
+      const n = el("div", "msg", "These settings come from environment variables and override what you save here: " + p.env_locked.join(", ") + ". Remove them from your .env file and recreate the container to manage them on this page.");
+      n.style.cssText = "background:var(--warnbg);color:var(--warn);margin:10px 0 0"; fields.appendChild(n);
+    }
     for (const f of spec.fields) {
-      const l = document.createElement("label"); l.textContent = f.label + (f.optional ? " (optional)" : "");
+      const l = el("label", "", f.label + (f.optional ? " (optional)" : ""));
       let i;
-      if (f.type === "textarea") { i = document.createElement("textarea"); i.rows = 5; i.spellcheck = false; i.style.cssText = "width:100%;font-family:ui-monospace,monospace;font-size:13px"; }
-      else if (f.type === "select") { i = document.createElement("select"); (f.options || []).forEach(o => i.add(new Option(o, o))); }
-      else { i = document.createElement("input"); i.type = f.secret ? "password" : "text"; }
+      if (f.type === "textarea") { i = el("textarea"); i.rows = 5; i.spellcheck = false; i.style.cssText = "width:100%;font-family:ui-monospace,monospace;font-size:13px"; }
+      else if (f.type === "select") { i = el("select"); (f.options || []).forEach(o => i.add(new Option(o, o))); }
+      else { i = el("input"); i.type = f.secret ? "password" : "text"; }
       i.dataset.name = f.name; i.autocomplete = "off"; if (f.placeholder) i.placeholder = f.placeholder;
       const st = state[f.name] || {};
       if (st.set && st.value) i.value = st.value;                       // non-secret values are shown so they can be edited
-      else if (st.set) i.placeholder = "•••••••• saved. Type to replace";  // secrets are never shown again
+      else if (st.set) {                                                // secrets are never shown again, only their last 4 characters
+        i.placeholder = "Saved. Type to replace";
+        if (st.last4) l.appendChild(el("span", "tail", "••••••••" + st.last4)); else l.appendChild(el("span", "tail", "•••••••• saved"));
+      }
       else if (f.default && i.tagName === "SELECT") i.value = f.default;
       fields.append(l, i);
       if (f.preview) {
-        const pl = document.createElement("label"); pl.textContent = "Preview (with a sample number and message)";
-        const pre = document.createElement("pre"); pre.style.margin = "0"; const code = document.createElement("code"); pre.appendChild(code);
+        const pl = el("label", "", "Preview (with a sample number and message)");
+        const pre = el("pre"); pre.style.margin = "0"; const code = el("code"); pre.appendChild(code);
         const upd = () => { code.textContent = renderPreview(i.value); };
         i.addEventListener("input", upd); upd(); fields.append(pl, pre);
       }
     }
     if (spec.example) {
-      const ex = document.createElement("button"); ex.type = "button"; ex.className = "btn ghost sm"; ex.style.marginTop = "10px"; ex.textContent = "Fill in an example";
+      const ex = el("button", "btn ghost sm", "Fill in an example"); ex.type = "button"; ex.style.marginTop = "10px";
       ex.onclick = () => fields.querySelectorAll("[data-name]").forEach(i => {
         const v = spec.example[i.dataset.name]; if (v !== undefined && !i.value.trim()) { i.value = v; i.dispatchEvent(new Event("input")); }
       });
       fields.append(ex);
     }
-    if (p.env_locked && p.env_locked.length) {
-      const n = document.createElement("div"); n.className = "msg"; n.style.cssText = "background:var(--warnbg);color:var(--warn);margin:10px 0 0";
-      n.textContent = "These settings come from environment variables and override what you save here: " + p.env_locked.join(", ") + ". Remove them from your .env file and recreate the container to manage them on this page.";
-      fields.prepend(n);
-    }
     let appRows = null;
     if (spec.apps) {
-      const wrap = document.createElement("div");
+      // Pushover: the first row is the DEFAULT app; "+" adds more. Nothing else to decide.
+      const wrap = el("div");
       wrap.innerHTML = `<label style="margin-top:16px">Applications</label>
-        <p class="help" style="margin:0 0 8px">Each Pushover application has its own token. Name them anything you like and use that name as <code>"app"</code> when sending. The default app is used when a message names none.</p>
-        <div data-apps></div><button type="button" class="btn ghost sm" data-addapp>+ Add application</button>`;
+        <p class="help" style="margin:0 0 8px">Create each application at pushover.net/apps/build and paste its API token. Use an app's name as <code>"app"</code> when sending. The default app is used when a message doesn't name one.</p>
+        <div data-apps></div><button type="button" class="btn ghost sm" data-addapp>+ Add another app</button>`;
       fields.appendChild(wrap);
       appRows = $("[data-apps]", wrap);
+      const relabel = () => [...appRows.children].forEach((r, i) => {
+        $("[data-role]", r).textContent = i === 0 ? "Default app" : "Additional app";
+        $("[data-appdefault]", r).classList.toggle("hidden", i === 0);
+        $("[data-appremove]", r).classList.toggle("hidden", i === 0);
+      });
       const addRow = (a) => {
-        const row = document.createElement("div"); row.className = "row"; row.style.cssText = "gap:8px;margin-bottom:8px;flex-wrap:nowrap";
-        row.innerHTML = `<input data-appname placeholder="app name (e.g. alerts)" autocomplete="off" style="flex:1;min-width:110px" />
-          <input data-apptoken type="password" autocomplete="off" style="flex:2;min-width:140px" />
-          <label class="row" style="margin:0;gap:4px;color:var(--fg);font-size:13px;white-space:nowrap"><input type="radio" name="defapp-${p.name}" data-appdefault style="width:auto" /> default</label>
-          <button type="button" class="btn danger sm" data-appremove title="Remove application">×</button>`;
+        const row = el("div", "row"); row.style.cssText = "gap:8px;margin-bottom:8px;align-items:flex-end";
+        row.innerHTML = `<div style="flex:1;min-width:120px"><small class="muted" data-role></small><input data-appname placeholder="app name (e.g. alerts)" autocomplete="off" /></div>
+          <div style="flex:2;min-width:150px"><small class="muted" data-tokenlabel>API token</small><input data-apptoken type="password" autocomplete="off" /></div>
+          <div class="row" style="gap:6px"><button type="button" class="btn ghost sm" data-appdefault title="Use this app when a message doesn't name one">Make default</button><button type="button" class="btn danger sm" data-appremove title="Remove this app">×</button></div>`;
         const nm = $("[data-appname]", row), tk = $("[data-apptoken]", row);
         nm.value = a.name; if (!a.isNew) { nm.readOnly = true; nm.style.opacity = ".7"; }
-        tk.placeholder = a.set ? "•••••••• saved. Type to replace" : "API token";
-        $("[data-appdefault]", row).checked = !!a.is_default;
-        $("[data-appremove]", row).onclick = () => row.remove();
-        appRows.appendChild(row);
+        tk.placeholder = a.set ? "Saved. Type to replace" : "paste the app's API token";
+        if (a.set) $("[data-tokenlabel]", row).appendChild(el("span", "tail", a.last4 ? "••••••••" + a.last4 : "•••••••• saved"));
+        $("[data-appdefault]", row).onclick = () => { appRows.prepend(row); relabel(); };
+        $("[data-appremove]", row).onclick = () => { row.remove(); relabel(); };
+        appRows.appendChild(row); relabel();
       };
-      (p.apps && p.apps.length ? p.apps : [{ name: "default", set: false, is_default: true, isNew: true }]).forEach(addRow);
-      $("[data-addapp]", wrap).onclick = () => addRow({ name: "", set: false, is_default: false, isNew: true });
+      const existing = (p.apps || []).slice().sort((x, y) => (y.is_default ? 1 : 0) - (x.is_default ? 1 : 0));
+      (existing.length ? existing : [{ name: "default", set: false, isNew: true }]).forEach(addRow);
+      $("[data-addapp]", wrap).onclick = () => { addRow({ name: "", set: false, isNew: true }); const last = appRows.lastElementChild; $("[data-appname]", last).focus(); };
     }
-    const badges = $("[data-badges]", el);
-    badges.innerHTML = (p.is_default && p.connected ? '<span class="badge default">Default</span>' : "") + (p.connected ? '<span class="badge connected">Connected</span>' : '<span class="badge not_set_up">Not connected</span>');
-    const actions = $("[data-actions]", el), out = $("[data-out]", el);
-    const btn = (text, cls, fn) => { const b = document.createElement("button"); b.className = "btn " + cls; b.textContent = text; b.onclick = () => fn(b); actions.appendChild(b); return b; };
-    const pw = () => $("[data-pw]", el).value;
-    const run = async (b, path, body, okMsg) => {
-      const label = b.textContent; b.disabled = true;
-      try { const r = await post("/gateway/channels/" + CH + path, { provider: p.name, password: pw(), ...body });
-        if (r.status) status = r.status; return r;
-      } catch (e) { say(out, e.message, "err"); return null; } finally { b.disabled = false; b.textContent = label; }
-    };
 
-    btn(p.connected ? "Save & check" : "Connect", "", async (b) => {
+    const actions = $("[data-actions]", root), out = $("[data-out]", root);
+    const save = el("button", "btn", isNew ? "Connect" : "Save changes"); actions.appendChild(save);
+    if (onCancel) { const c = el("button", "btn ghost", "Cancel"); c.type = "button"; c.onclick = onCancel; actions.appendChild(c); }
+    save.onclick = async () => {
       const values = {}; fields.querySelectorAll("input,textarea,select").forEach(i => { if (i.dataset.name && i.value.trim()) values[i.dataset.name] = i.value.trim(); });
       const extra = {};
       if (appRows) {
         const rows = [...appRows.children];
         extra.apps = rows.map(r => ({ name: $("[data-appname]", r).value.trim(), token: $("[data-apptoken]", r).value.trim() }));
-        const d = rows.find(r => $("[data-appdefault]", r).checked);
-        extra.default_app = d ? $("[data-appname]", d).value.trim() : null;
+        extra.default_app = rows.length ? $("[data-appname]", rows[0]).value.trim() : null;   // the first row is the default
       }
-      b.textContent = "Checking…";
-      const r = await run(b, "/save", { values, ...extra }); if (!r) return;
-      if (r.ok) { render(); const c = document.getElementById(p.name); say($("[data-out]", c), "Saved. The provider accepted these credentials.", "ok"); }
-      else { header(); say(out, r.error || "The provider rejected these credentials.", "err"); render(p.name, r.error); }
-    });
-    if (p.connected) {
-      btn("Send test", "ghost", () => window.MG.openTest(CH, LABEL, status.connected, status.default, p.name, p.apps));
-      if (!p.is_default) btn("Make default", "ghost", async (b) => { const r = await run(b, "/default", {}); if (r) { if (r.ok) render(); else say(out, r.error, "err"); } });
-      let armed = false;
-      btn("Remove", "danger", async (b) => {
-        if (!armed) { armed = true; b.textContent = "Click again to confirm"; setTimeout(() => { armed = false; b.textContent = "Remove"; }, 4000); return; }
-        const r = await run(b, "/remove", {}); if (r) { if (r.ok) render(); else say(out, r.error, "err"); }
-      });
-    }
-    return el;
+      const label = save.textContent; save.disabled = true; save.textContent = "Checking…";
+      try {
+        const r = await post("/gateway/channels/" + CH + "/save", { provider: p.name, values, ...extra });
+        if (r.status) status = r.status;
+        if (r.ok) { ui.adding = false; ui.chosen = null; ui.editing = null; ui.flash = { text: providerLabel(p.name) + " is connected. The provider accepted these credentials. Use Send test to confirm a message arrives.", kind: "ok" }; render(); }
+        else say(out, (r.error || "The provider rejected these credentials.") + (r.status && r.status.connected.some(c => c.name === p.name) ? " Your entries were saved; fix them and try again." : ""), "err");
+      } catch (e) { say(out, e.message, "err"); } finally { save.disabled = false; save.textContent = label; }
+    };
+    return root;
   }
 
+  // ---------------- "Choose a provider" ----------------
+  function picker(unconnected, canCancel) {
+    const card = el("div", "card");
+    card.appendChild(el("h2", "", unconnected.length === status.providers.length ? "Choose a provider" : "Add another provider"));
+    card.appendChild(el("p", "muted", "Pick the service you use to send " + LABEL.toLowerCase() + ". You'll only be asked for that provider's details."));
+    const grid = el("div"); grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:8px";
+    for (const p of unconnected) {
+      const spec = SPEC.providers[p.name];
+      const tile = el("button", "opt"); tile.type = "button"; tile.dataset.pick = p.name; tile.style.cssText = "text-align:left;display:block;width:100%;font:inherit";
+      const t = el("b", "", spec.label); const s = el("small", "", spec.blurb || ""); s.style.display = "block";
+      tile.append(t, s);
+      if (p.fields.some(f => f.set)) { const w = el("small", "", "Partly set up"); w.style.cssText = "display:block;color:var(--warn)"; tile.appendChild(w); }
+      tile.onclick = () => { ui.chosen = p.name; render(); };
+      grid.appendChild(tile);
+    }
+    card.appendChild(grid);
+    if (canCancel) { const c = el("button", "btn ghost sm", "Cancel"); c.type = "button"; c.style.marginTop = "12px"; c.onclick = () => { ui.adding = false; render(); }; card.appendChild(c); }
+    return card;
+  }
+
+  // ---------------- one connected provider ----------------
+  function connectedCard(p) {
+    const spec = SPEC.providers[p.name];
+    const card = el("div", "pcard" + (p.is_default ? " is-default" : "")); card.id = p.name;
+    const head = el("div", "row between"); head.appendChild(el("h3", "", spec.label));
+    const badges = el("span", "row"); badges.style.gap = "6px";
+    if (p.is_default) badges.appendChild(el("span", "badge default", "Default"));
+    badges.appendChild(el("span", "badge connected", "Connected"));
+    head.appendChild(badges); card.appendChild(head);
+    const sum = el("p", "muted", summarize(p)); sum.style.margin = "6px 0 0"; card.appendChild(sum);
+
+    const actions = el("div", "actions"); card.appendChild(actions);
+    const out = el("div"); card.appendChild(out);
+    const btn = (text, cls, fn) => { const b = el("button", "btn " + cls, text); b.type = "button"; b.onclick = () => fn(b); actions.appendChild(b); return b; };
+    const act = async (b, path, body) => {   // Make default / Remove: the logged-in administrator session is enough
+      const label = b.textContent; b.disabled = true;
+      try { const r = await post("/gateway/channels/" + CH + path, { provider: p.name, ...body }); if (r.status) status = r.status; return r; }
+      catch (e) { say(out, e.message, "err"); return null; } finally { b.disabled = false; b.textContent = label; }
+    };
+    btn("Send test", "", () => window.MG.openTest(CH, LABEL, status.connected, status.default, p.name, p.apps));
+    if (!p.is_default) btn("Make default", "ghost", async (b) => { const r = await act(b, "/default", {}); if (r) { if (r.ok) { ui.flash = { text: spec.label + " is now the default.", kind: "ok" }; render(); } else say(out, r.error, "err"); } });
+    btn(ui.editing === p.name ? "Close" : "Edit", "ghost", () => { ui.editing = ui.editing === p.name ? null : p.name; render(); });
+    let armed = false;
+    btn("Remove", "danger", async (b) => {
+      if (!armed) { armed = true; b.textContent = "Click again to remove"; setTimeout(() => { armed = false; b.textContent = "Remove"; }, 4000); return; }
+      const r = await act(b, "/remove", {}); if (r) { if (r.ok) { ui.flash = { text: spec.label + " was removed.", kind: "ok" }; render(); } else say(out, r.error, "err"); }
+    });
+    if (ui.editing === p.name) { const f = formFor(p, { isNew: false, onCancel: () => { ui.editing = null; render(); } }); f.style.marginTop = "12px"; card.appendChild(f); }
+    return card;
+  }
+
+  // ---------------- channel-level defaults (SMS default phone number) ----------------
   function defaultsCard() {
-    const box = $("#defaults"); box.innerHTML = "";
-    if (!status.defaults || !status.defaults.length) return;
-    const el = document.createElement("div"); el.className = "card";
-    el.innerHTML = `<h3>Channel defaults</h3><div data-rows></div>
-      <label>Your password (to confirm changes)</label><input type="password" data-pw autocomplete="current-password" style="max-width:300px" />
+    if (!status.defaults || !status.defaults.length) return null;
+    const card = el("div", "card");
+    card.innerHTML = `<h3>Channel defaults</h3><div data-rows></div>
       <div class="actions"><button class="btn" data-save>Save defaults</button></div><div data-out></div>`;
-    const rows = $("[data-rows]", el);
+    const rows = $("[data-rows]", card);
     for (const d of status.defaults) {
-      const l = document.createElement("label"); l.textContent = d.label;
-      const i = document.createElement("input"); i.dataset.name = d.name; i.value = d.value || ""; i.placeholder = d.placeholder || ""; i.autocomplete = "off"; i.style.maxWidth = "320px";
-      const h = document.createElement("p"); h.className = "help"; h.style.margin = "4px 0 0"; h.textContent = d.help;
+      const l = el("label", "", d.label);
+      const i = el("input"); i.dataset.name = d.name; i.value = d.value || ""; i.placeholder = d.placeholder || ""; i.autocomplete = "off"; i.style.maxWidth = "320px";
+      const h = el("p", "help", d.help); h.style.margin = "4px 0 0";
       rows.append(l, i, h);
     }
-    $("[data-save]", el).onclick = async (ev) => {
+    $("[data-save]", card).onclick = async (ev) => {
       const values = {}; rows.querySelectorAll("input").forEach(i => values[i.dataset.name] = i.value.trim());
-      const b = ev.target; b.disabled = true; const out = $("[data-out]", el);
+      const b = ev.target; b.disabled = true; const out = $("[data-out]", card);
       try {
-        const r = await post("/gateway/channels/" + CH + "/defaults", { values, password: $("[data-pw]", el).value });
+        const r = await post("/gateway/channels/" + CH + "/defaults", { values });
         if (r.status) status = r.status;
-        $("[data-pw]", el).value = "";
         r.ok ? say(out, "Saved.", "ok") : say(out, r.error || "Could not save.", "err");
       } catch (e) { say(out, e.message, "err"); } finally { b.disabled = false; }
     };
-    box.appendChild(el);
+    return card;
   }
 
-  function render(keepMsgFor, msg) {
+  function render() {
     header();
-    defaultsCard();
-    const box = $("#providers"); box.innerHTML = "";
-    status.providers.forEach(p => box.appendChild(card(p)));
-    if (keepMsgFor && msg) say($("[data-out]", document.getElementById(keepMsgFor)), msg, "err");
+    const flash = $("#flash"); flash.innerHTML = "";
+    if (ui.flash) { say(flash, ui.flash.text, ui.flash.kind); flash.firstChild.style.marginTop = "0"; ui.flash = null; }
+    const main = $("#main"); main.innerHTML = "";
+    const connected = status.providers.filter(p => p.connected);
+    const unconnected = status.providers.filter(p => !p.connected);
+    if (!connected.length) ui.adding = true;
+
+    // Adding a provider: choose one, then fill in only that provider's form.
+    if (ui.adding) {
+      const chosen = ui.chosen && unconnected.find(p => p.name === ui.chosen);
+      if (!chosen) { ui.chosen = null; main.appendChild(picker(unconnected, connected.length > 0)); }
+      else {
+        const card = el("div", "card"); const head = el("div", "row between");
+        head.appendChild(el("h2", "", "Connect " + providerLabel(chosen.name)));
+        const back = el("button", "btn ghost sm", "← Choose a different provider"); back.type = "button";
+        back.onclick = () => { ui.chosen = null; if (!connected.length) ui.adding = true; render(); };
+        head.appendChild(back); card.appendChild(head);
+        const f = formFor(chosen, { isNew: true, onCancel: connected.length ? () => { ui.adding = false; ui.chosen = null; render(); } : null }); f.style.marginTop = "10px";
+        card.appendChild(f); main.appendChild(card);
+      }
+    } else {
+      connected.forEach(p => main.appendChild(connectedCard(p)));
+      if (unconnected.length) { const add = el("button", "btn ghost", "+ Add another provider"); add.type = "button"; add.onclick = () => { ui.adding = true; ui.chosen = null; render(); }; main.appendChild(add); }
+      if (connected.length > 1) {
+        const tip = el("p", "muted"); tip.style.marginTop = "14px";
+        tip.innerHTML = 'Tip: a message can pick a provider with <code>"provider": "' + connected[0].name + '"</code>. Without it, the default is used.';
+        main.appendChild(tip);
+      }
+      const dc = defaultsCard(); if (dc) main.appendChild(dc);
+    }
   }
   render();
-  if (location.hash) { const t = document.querySelector(location.hash); if (t) t.scrollIntoView(); }
 </script>
 {% endblock %}
