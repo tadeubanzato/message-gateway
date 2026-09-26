@@ -1,0 +1,13 @@
+# secrets and local state — never commit these
+.env
+.env.*
+!.env.example
+data/
+*.db
+bootstrap.json
+
+# python / tooling
+__pycache__/
+*.pyc
+.venv/
+.DS_Store

@@ -4,11 +4,16 @@ services:
     image: relay-gateway:local
     restart: unless-stopped
 
+    # Optional: only needed for advanced overrides. Normal setup happens in the
+    # browser at http://localhost:8010 and is stored encrypted in the database.
     env_file:
-      - .env
+      - path: .env
+        required: false
 
     ports:
-      - "8010:8000"     # HTTP API + portal + MCP server (all served by the same uvicorn process)
+      # Bound to localhost on purpose: the first-run setup page is unauthenticated.
+      # To expose the gateway on your network, change to "8010:8000" after setup.
+      - "127.0.0.1:8010:8000"  # HTTP API + portal + MCP server (same uvicorn process)
       - "127.0.0.1:15672:15672"  # RabbitMQ management UI — localhost only
 
     volumes:

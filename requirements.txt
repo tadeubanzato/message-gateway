@@ -17,3 +17,4 @@ scalar-fastapi==1.9.1
 
 # MCP server
 mcp==1.27.1
+cryptography>=43,<46

@@ -6,7 +6,7 @@ def _deliver(msg: dict):
     email_type = (msg.get("emailType") or "txt").strip().lower()
     if email_type not in ("txt", "html"):
         email_type = "txt"
-    return get_email_provider().send(
+    return get_email_provider((msg.get("provider") or "").strip() or None).send(
         to=(msg.get("to") or "").strip(),
         subject=(msg.get("subject") or "Message Gateway").strip(),
         body=msg.get("body", "") or "",

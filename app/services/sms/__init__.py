@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+from app.services.env import get_env
 
 from app.services.sms.base import SmsProvider
 
@@ -10,7 +10,7 @@ PROVIDER_REGISTRY = {
     "local_modem": "app.services.sms.local_modem:LocalModemProvider",
 }
 
-_active: SmsProvider | None = None
+_cache: dict[str, SmsProvider] = {}
 
 
 def _load(path: str) -> SmsProvider:
@@ -21,14 +21,24 @@ def _load(path: str) -> SmsProvider:
     return getattr(mod, cls_name)()
 
 
-def get_sms_provider() -> SmsProvider:
-    global _active
-    if _active is not None:
-        return _active
-    name = os.environ.get("SMS_PROVIDER", "twilio").strip().lower() or "twilio"
+def default_provider_name() -> str:
+    """The channel's default provider (what a message uses when it names none)."""
+    return (get_env("SMS_PROVIDER", "twilio") or "twilio").strip().lower() or "twilio"
+
+
+def get_sms_provider(name: str | None = None) -> SmsProvider:
+    """Provider instance by name (default: the channel default). Resolved on every
+    call, so changes made in Settings apply without a restart."""
+    name = (name or default_provider_name()).strip().lower()
+    if name not in PROVIDER_REGISTRY:
+        raise SystemExit(f"Unsupported sms provider {name!r}. Options: {list(PROVIDER_REGISTRY)}")
+    if name not in _cache:
+        _cache[name] = _load(PROVIDER_REGISTRY[name])
+    return _cache[name]
     if name not in PROVIDER_REGISTRY:
         raise SystemExit(f"Unsupported SMS_PROVIDER={name!r}. Options: {list(PROVIDER_REGISTRY)}")
     _active = _load(PROVIDER_REGISTRY[name])
+    _active_name = name
     return _active
 
 

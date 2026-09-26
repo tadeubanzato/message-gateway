@@ -1,22 +1,19 @@
 """
 API token generation + HMAC hashing.
 
-Env:
-- TOKEN_HMAC_SECRET (required)
+The HMAC secret is generated automatically on first start (app.bootstrap);
+a TOKEN_HMAC_SECRET environment variable still overrides it.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import secrets
 
-_SECRET = os.environ.get("TOKEN_HMAC_SECRET", "").strip()
-if not _SECRET:
-    raise SystemExit("TOKEN_HMAC_SECRET is missing")
+from app import bootstrap
 
-_SECRET_BYTES = _SECRET.encode("utf-8")
+_SECRET_BYTES = bootstrap.get("token_hmac_secret").encode("utf-8")
 
 USER_KEY_PREFIX = "gw_user_"
 TOKEN_PREFIX = "gw_tok_"

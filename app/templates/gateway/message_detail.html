@@ -1,0 +1,41 @@
+{% extends "gateway/base.html" %}
+{% block title %}Message Gateway - Message{% endblock %}
+{% block content %}
+<p class="muted"><a href="/gateway/messages">← Message log</a></p>
+<div class="row between"><h1 style="margin:0">Message</h1><span class="badge {{ m.status }}">{{ m.status }}</span></div>
+<p class="sub"><code>{{ m.message_id }}</code></p>
+
+<div class="card">
+  <div class="kv">
+    <div class="k">Channel</div><div>{{ m.channel }}</div>
+    <div class="k">To</div><div>{{ m.to or '-' }}</div>
+    <div class="k">Queued</div><div>{{ (m.queued_at or '')[:19].replace('T',' ') }} UTC</div>
+    {% if m.delivered_at %}<div class="k">Delivered</div><div>{{ m.delivered_at[:19].replace('T',' ') }} UTC</div>{% endif %}
+    {% if m.failed_at %}<div class="k">Failed</div><div>{{ m.failed_at[:19].replace('T',' ') }} UTC</div>{% endif %}
+    {% if m.provider %}<div class="k">Provider</div><div>{{ m.provider }}</div>{% endif %}
+    {% if m.app %}<div class="k">App</div><div>{{ m.app }}</div>{% endif %}
+    {% if m.template %}<div class="k">Template</div><div>{{ m.template }}</div>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Content</h2>
+  {% if m.body is none %}<div class="muted">Not stored (message content logging was off).</div>
+  {% else %}{% if m.subject %}<div><b>{{ m.subject }}</b></div>{% endif %}<div style="white-space:pre-wrap;word-break:break-word;margin-top:6px">{{ m.body }}</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Delivery attempts</h2>
+  {% if attempts %}
+  <div class="scroll"><table>
+    <thead><tr><th>#</th><th>Result</th><th>Provider</th><th>HTTP</th><th>Detail</th></tr></thead>
+    <tbody>
+    {% for a in attempts %}
+      <tr><td>{{ a.attempt_number }}</td><td><span class="badge {{ 'delivered' if a.ok else 'failed' }}">{{ 'ok' if a.ok else 'failed' }}</span></td><td>{{ a.provider or '-' }}</td><td>{{ a.status_code or '-' }}</td><td>{{ a.error or a.provider_message_id or '' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<div class="muted">No attempts yet. The message is waiting in the queue.</div>{% endif %}
+  {% if m.last_error and m.status != 'delivered' %}<div class="msg err">{{ m.last_error }}</div>{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "gateway/base.html" %}
+{% block title %}Message Gateway - Message log{% endblock %}
+{% block content %}
+<h1>Message log</h1>
+<p class="sub">Everything sent through your gateway, newest first. Entries are kept 90 days.</p>
+
+<form method="get" action="/gateway/messages" class="row" style="margin-bottom:12px">
+  <input name="q" value="{{ q }}" placeholder="Search recipient, subject, text or ID" style="flex:1;min-width:220px;max-width:360px" />
+  <select name="channel" style="width:auto"><option value="">All channels</option>{% for c in ["email","sms","push"] %}<option value="{{ c }}" {{ 'selected' if channel == c }}>{{ c }}</option>{% endfor %}</select>
+  <select name="status" style="width:auto"><option value="">Any status</option>{% for s in ["queued","delivered","failed"] %}<option value="{{ s }}" {{ 'selected' if status == s }}>{{ s }}</option>{% endfor %}</select>
+  <button class="btn" type="submit">Filter</button>
+  {% if q or channel or status %}<a class="btn ghost" href="/gateway/messages">Clear</a>{% endif %}
+</form>
+
+{% if not content_enabled %}<div class="msg" style="background:var(--warnbg);color:var(--warn);margin:0 0 12px">Message content isn't being stored, so only details are shown. Change this in Settings.</div>{% endif %}
+
+<div class="card" style="padding:6px 8px">
+{% if messages %}
+  <div class="scroll"><table>
+    <thead><tr><th>Time (UTC)</th><th>Channel</th><th>To</th><th>Message</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for m in messages %}
+      <tr>
+        <td style="white-space:nowrap">{{ (m.queued_at or '')[:19].replace('T',' ') }}</td>
+        <td>{{ m.channel }}</td>
+        <td>{{ m.to or '-' }}</td>
+        <td style="max-width:340px;word-break:break-word">{% if m.subject %}<b>{{ m.subject }}</b><br />{% endif %}{{ (m.body or '-')[:140] }}{{ '…' if m.body and m.body|length > 140 }}</td>
+        <td><span class="badge {{ m.status }}">{{ m.status }}</span>{% if m.last_error and m.status != 'delivered' %}<div class="muted" style="color:var(--err)">{{ m.last_error }}</div>{% endif %}</td>
+        <td><a href="/gateway/messages/{{ m.message_id }}">Details</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if more %}<div style="padding:10px"><a class="btn ghost sm" href="?q={{ q }}&channel={{ channel }}&status={{ status }}&limit={{ limit + 100 }}">Show more</a></div>{% endif %}
+{% else %}
+  <div class="empty">{% if q or channel or status %}No messages match those filters.{% else %}No messages yet. Once you send one it will show up here. <a href="/gateway">See how</a>.{% endif %}</div>
+{% endif %}
+</div>
+{% endblock %}

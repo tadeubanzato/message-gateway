@@ -1,17 +1,23 @@
 import contextlib
 import os
 import re
+import threading
 import time
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
 from app.auth import require_api_key
 from app.broker import publish_message
 from app.db import backend_name, get_repository
 from app.mcp_server.server import mcp
+from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
+from app.routes.portal_ui import router as portal_ui_router
+from app.services import channels, message_log
+from app.version import APP_NAME, APP_VERSION
 from app.schemas import MessageEnqueued, MessageRequest, MessageResponse
 
 # The MCP server is served from this same FastAPI app (same port, path
@@ -29,14 +35,32 @@ from app.schemas import MessageEnqueued, MessageRequest, MessageResponse
 #    Starlette's Mount matches by prefix and "/" matches everything. The
 #    fix is to copy the MCP sub-app's routes directly into this app's
 #    router instead of mounting the whole sub-app.
+RETENTION_SECONDS = 90 * 24 * 3600
+
+
+def _purge_loop() -> None:
+    """SQLite has no TTL indexes, so old log entries are deleted here hourly.
+    (Atlas expires them itself via TTL indexes; its purge is a no-op.)"""
+    while True:
+        try:
+            get_repository().purge_old_messages(RETENTION_SECONDS)
+        except Exception:
+            pass
+        time.sleep(3600)
+
+
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     get_repository()  # initializes schema/indexes for whichever backend is active
+    threading.Thread(target=_purge_loop, name="log-purge", daemon=True).start()
     async with mcp.session_manager.run():
         yield
 
 
-app = FastAPI(title="Relay Gateway", version="0.1.0", lifespan=_lifespan)
+app = FastAPI(title=APP_NAME, version=APP_VERSION, lifespan=_lifespan)
+
+# One stylesheet for every page (setup, portal, get-started).
+app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
 for _route in mcp.streamable_http_app().routes:
     app.router.routes.append(_route)
@@ -108,7 +132,9 @@ def _validate_email_recipients_or_400(recipients: list[str]) -> None:
         )
 
 
+app.include_router(onboarding_router)
 app.include_router(portal_router)
+app.include_router(portal_ui_router)
 
 
 @app.get("/health")
@@ -133,33 +159,33 @@ def get_started():
         f"Connect to the MCP server at {mcp_url} and run through its setup wizard "
         "to configure this message gateway."
     )
-    return f"""
-    <!doctype html>
-    <html lang="en">
-    <head>
-      <meta charset="utf-8" />
-      <title>Get Started — Relay Gateway</title>
-      <style>
-        body {{ font-family: system-ui, sans-serif; max-width: 720px; margin: 60px auto; padding: 0 20px; color: #111; }}
-        h1 {{ font-size: 22px; }}
-        .box {{ background: #f5f5f7; border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 16px 0; }}
-        code {{ font-family: ui-monospace, monospace; }}
-        .prompt {{ font-size: 14px; line-height: 1.5; }}
-        button {{ padding: 8px 14px; border-radius: 8px; border: 1px solid #111; background: #111; color: #fff; cursor: pointer; }}
-      </style>
-    </head>
-    <body>
-      <h1>Relay Gateway — Get Started</h1>
-      <p>MCP server URL: <code>{mcp_url}</code></p>
-      <p>Paste this prompt into Claude Code, Codex, Claude Desktop, or any MCP-capable agent:</p>
-      <div class="box">
-        <div class="prompt" id="prompt-text">{prompt}</div>
-      </div>
-      <button onclick="navigator.clipboard.writeText(document.getElementById('prompt-text').innerText)">Copy prompt</button>
-      <p><a href="/scalar">API reference</a> · <a href="/docs">Swagger</a></p>
-    </body>
-    </html>
-    """
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Get started - {APP_NAME}</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <main class="page">
+    <h1>{APP_NAME}</h1>
+    <p class="sub">Two ways to set up your gateway.</p>
+    <div class="card">
+      <h2>In your browser</h2>
+      <p style="margin-top:0">The guided setup walks you through the database, your providers and a test message.</p>
+      <a class="btn" href="/">Open setup</a>
+    </div>
+    <div class="card">
+      <h2>With an AI agent</h2>
+      <p class="muted" style="margin-top:0">MCP server: <code>{mcp_url}</code>. Paste this prompt into Claude Code, Codex or any MCP-capable agent:</p>
+      <pre><code id="prompt-text">{prompt}</code></pre>
+      <button class="btn ghost sm" onclick="navigator.clipboard.writeText(document.getElementById('prompt-text').innerText)">Copy prompt</button>
+    </div>
+    <p class="muted"><a href="/scalar">API reference</a> &middot; <a href="/docs">Swagger</a></p>
+  </main>
+</body>
+</html>"""
 
 
 @app.get("/v1/auth/whoami")
@@ -215,7 +241,16 @@ def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
     if channel == "email":
         final_subject = _render_context(req.subject or "", req.context)
 
-    repo = get_repository()
+    requested = (req.provider or "").strip().lower() or None
+    if requested:
+        connected = channels.connected_providers(channel)
+        if requested not in connected:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": f"Provider '{requested}' isn't set up for {channel}.",
+                        "available": connected, "default": channels.default_provider(channel)},
+            )
+
     message_ids: list[str] = []
 
     for to in recipients:
@@ -227,16 +262,7 @@ def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
         req_one = req.model_copy(update=update_payload)
         msg = MessageEnqueued.from_request(req_one)
 
-        try:
-            repo.insert_message({
-                "message_id": msg.message_id,
-                "channel": msg.channel,
-                "status": "queued",
-                "account_id": auth.get("account_id"),
-                "to": to,
-            })
-        except Exception:
-            pass  # message logging must never block delivery
+        message_log.record_queued(msg, auth.get("account_id"), used_template)
 
         publish_message(msg)
         message_ids.append(msg.message_id)
@@ -246,3 +272,40 @@ def create_message(req: MessageRequest, auth: dict = Depends(require_api_key)):
     if len(message_ids) == 1:
         return MessageResponse(status="queued", message_id=message_ids[0], to_deduped=to_deduped_field, template=used_template)
     return MessageResponse(status="queued", message_ids=message_ids, to_deduped=to_deduped_field, template=used_template)
+
+
+@app.get("/v1/messages", tags=["Message log"], summary="List your sent messages")
+def list_messages(
+    channel: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    auth: dict = Depends(require_api_key),
+):
+    """Your message log, newest first: timestamp, channel, recipient, status,
+    provider, attempts and (unless disabled) the decrypted subject and body."""
+    limit = max(1, min(int(limit), 200))
+    docs = get_repository().list_messages(channel, status, limit, account_id=auth["account_id"])
+    return {"messages": [message_log.public_view(d) for d in docs]}
+
+
+@app.get("/v1/messages/{message_id}", tags=["Message log"], summary="Get one message and its delivery attempts")
+def get_message(message_id: str, auth: dict = Depends(require_api_key)):
+    repo = get_repository()
+    doc = repo.get_message(message_id)
+    if not doc or doc.get("account_id") != auth["account_id"]:
+        raise HTTPException(status_code=404, detail="Message not found")
+    attempts = [
+        {k: v for k, v in a.items() if k not in ("_id", "created_at")}
+        for a in repo.list_attempts(message_id)
+    ]
+    return {**message_log.public_view(doc), "delivery_attempts": attempts}
+
+
+@app.get("/v1/providers", tags=["Providers"], summary="Which providers you can send with")
+def list_providers(auth: dict = Depends(require_api_key)):
+    """For each channel, the connected providers and the default. Pass any of
+    these as "provider" in POST /v1/messages to choose one per message."""
+    return {
+        ch: {"default": channels.default_provider(ch), "available": channels.connected_providers(ch)}
+        for ch in channels.CATALOG
+    }

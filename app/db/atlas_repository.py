@@ -5,7 +5,6 @@ gateway_portal.py query logic behind the shared Repository interface.
 
 from __future__ import annotations
 
-import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -15,9 +14,6 @@ from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 
 from app.db.base import DuplicateEmailError, DuplicateUserKeyError, Repository
-
-MONGODB_URI = os.environ.get("MONGODB_URI", "").strip()
-MONGODB_DB = os.environ.get("MONGODB_DB", "").strip()
 
 _NINETY_DAYS_SECONDS = 90 * 24 * 3600
 
@@ -38,20 +34,20 @@ def _to_object_id(id_str: str):
 
 
 class AtlasRepository(Repository):
-    def __init__(self) -> None:
-        if not MONGODB_URI:
-            raise SystemExit("MONGODB_URI is missing (required when DB_BACKEND=atlas)")
-        if not MONGODB_DB:
-            raise SystemExit("MONGODB_DB is missing (required when DB_BACKEND=atlas)")
+    def __init__(self, uri: str, db_name: str) -> None:
+        if not uri:
+            raise SystemExit("MongoDB URI is missing (required for the atlas backend)")
+        if not db_name:
+            raise SystemExit("MongoDB database name is missing (required for the atlas backend)")
 
         self._client = MongoClient(
-            MONGODB_URI,
+            uri,
             serverSelectionTimeoutMS=5000,
             connectTimeoutMS=5000,
             socketTimeoutMS=5000,
             retryWrites=True,
         )
-        self._db = self._client[MONGODB_DB]
+        self._db = self._client[db_name]
 
     # ---- accounts ----
     def find_account_by_email(self, email: str) -> Optional[dict[str, Any]]:
@@ -87,6 +83,18 @@ class AtlasRepository(Repository):
                 raise DuplicateUserKeyError() from e
             raise
         return str(result.inserted_id)
+
+    def count_accounts(self) -> int:
+        return int(self._db.accounts.count_documents({}))
+
+    def oldest_account_id(self) -> Optional[str]:
+        doc = self._db.accounts.find_one({}, sort=[("_id", 1)], projection={"_id": 1})
+        return str(doc["_id"]) if doc else None
+
+    def set_password_hash(self, account_id: str, password_hash: str) -> None:
+        self._db.accounts.update_one(
+            {"_id": _to_object_id(account_id)}, {"$set": {"password_hash": password_hash}}
+        )
 
     def push_token(self, account_id: str, token_doc: dict[str, Any]) -> None:
         self._db.accounts.update_one(
@@ -131,15 +139,24 @@ class AtlasRepository(Repository):
         self._db.messages.insert_one(doc)
 
     def list_messages(
-        self, channel: Optional[str], status: Optional[str], limit: int
+        self, channel: Optional[str], status: Optional[str], limit: int,
+        account_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         q: dict[str, Any] = {}
         if channel:
             q["channel"] = channel
         if status:
             q["status"] = status
+        if account_id is not None:
+            q["account_id"] = account_id
         cursor = self._db.messages.find(q).sort("created_at", -1).limit(limit)
         return [_stringify_id(d) for d in cursor]
+
+    def get_message(self, message_id: str) -> Optional[dict[str, Any]]:
+        return _stringify_id(self._db.messages.find_one({"message_id": message_id}))
+
+    def update_message_fields(self, message_id: str, fields: dict[str, Any]) -> None:
+        self._db.messages.update_one({"message_id": message_id}, {"$set": fields})
 
     def update_message_status(self, message_id: str, status: str) -> None:
         self._db.messages.update_one({"message_id": message_id}, {"$set": {"status": status}})
@@ -158,6 +175,20 @@ class AtlasRepository(Repository):
         # ensure_indexes() (expireAfterSeconds) for automatic cleanup, rather
         # than an app-triggered delete. Returns 0 to signal "handled by DB."
         return 0
+
+    # ---- settings ----
+    def list_settings(self) -> dict[str, dict[str, Any]]:
+        return {d["_id"]: d for d in self._db.settings.find({})}
+
+    def set_setting(self, name: str, value_enc: str) -> None:
+        self._db.settings.update_one(
+            {"_id": name},
+            {"$set": {"value_enc": value_enc, "updated_at": time.time()}},
+            upsert=True,
+        )
+
+    def delete_setting(self, name: str) -> None:
+        self._db.settings.delete_one({"_id": name})
 
     # ---- lifecycle ----
     def ensure_indexes(self) -> None:
@@ -188,3 +219,28 @@ class AtlasRepository(Repository):
             return True
         except Exception:
             return False
+
+
+def test_connection(uri: str, db_name: str) -> tuple[bool, str]:
+    """Try to reach an Atlas cluster with the given URI. Returns (ok, message).
+    Used by onboarding before anything is saved; error text never echoes the URI."""
+    if not (uri or "").strip():
+        return False, "Enter a MongoDB connection string."
+    if not (db_name or "").strip():
+        return False, "Enter a database name."
+    client = None
+    try:
+        client = MongoClient(uri, serverSelectionTimeoutMS=8000, connectTimeoutMS=8000)
+        client.admin.command("ping")
+        client[db_name].list_collection_names()
+        return True, "Connected."
+    except Exception as e:  # noqa: BLE001 - surface a safe, short reason
+        name = type(e).__name__
+        if "Authentication" in name or "OperationFailure" in name:
+            return False, "Authentication failed: check the username, password and database permissions."
+        if "ServerSelection" in name or "Timeout" in name or "Configuration" in name:
+            return False, "Could not reach the cluster: check the connection string and that your IP is allowed in Atlas Network Access."
+        return False, f"Connection failed ({name})."
+    finally:
+        if client is not None:
+            client.close()

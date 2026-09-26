@@ -1,0 +1,61 @@
+{% extends "gateway/base.html" %}
+{% block title %}Message Gateway{% endblock %}
+{% block content %}
+<h1>Welcome, {{ user_name }}</h1>
+<p class="sub">Your gateway at a glance.</p>
+
+<div class="grid">
+  {% for c in channels %}
+  <div class="card">
+    <div class="row between"><h2 style="margin:0">{{ c.label }}</h2><span class="badge {{ c.state }}">{{ {'ready':'Ready','needs_attention':'Needs attention','not_set_up':'Not set up'}[c.state] }}</span></div>
+    <p class="muted" style="margin:8px 0 0">
+      {% if c.state == 'not_set_up' %}No provider connected yet.
+      {% elif c.state == 'ready' %}Default: <b>{{ c.default_label }}</b>{% if c.connected|length > 1 %}<br />Also connected: {{ c.connected | rejectattr('name', 'equalto', c.default) | map(attribute='label') | join(', ') }}{% endif %}
+      {% else %}The default ({{ c.default_label }}) isn't connected. Connected: {{ c.connected | map(attribute='label') | join(', ') }}.{% endif %}
+    </p>
+    {% if is_owner %}
+      <div class="actions">
+        {% if c.connected %}
+          <button class="btn sm" data-test-channel="{{ c.channel }}" data-test-label="{{ c.label }}" data-default="{{ c.default }}" data-providers='{{ c.connected | tojson }}'>Send test</button>
+          <a class="btn ghost sm" href="/gateway/channels/{{ c.channel }}">{{ 'Fix' if c.state == 'needs_attention' else 'Manage' }}</a>
+        {% else %}
+          <a class="btn sm" href="/gateway/channels/{{ c.channel }}">Set up</a>
+        {% endif %}
+      </div>
+    {% elif c.state != 'ready' %}<p class="muted" style="margin:10px 0 0">The owner of this gateway sets this up.</p>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <div class="row between"><h2 style="margin:0">Recent messages</h2><a href="/gateway/messages">View all</a></div>
+  {% if recent %}
+    <div class="scroll"><table style="margin-top:8px">
+      <thead><tr><th>Time (UTC)</th><th>Channel</th><th>To</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for m in recent %}
+        <tr>
+          <td>{{ (m.queued_at or '')[:19].replace('T',' ') }}</td><td>{{ m.channel }}</td><td>{{ m.to or '-' }}</td>
+          <td><a href="/gateway/messages/{{ m.message_id }}" style="text-decoration:none"><span class="badge {{ m.status }}">{{ m.status }}</span></a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <p class="muted" style="margin:10px 0 0">Of your last {{ recent_total }}: {{ counts.delivered }} delivered, {{ counts.failed }} failed, {{ counts.queued }} waiting.</p>
+  {% else %}
+    <div class="empty">No messages yet. Send your first one with the example below.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Send a message</h2>
+  <p class="muted" style="margin-top:0">Use your user key and an API token from <a href="/gateway/keys">API keys</a>. Tokens are shown only once, so paste yours in place of <code>YOUR_TOKEN</code>. Add <code>"provider": "name"</code> to pick a specific connected provider; without it the channel's default is used.</p>
+  <pre><code id="snippet">curl -X POST {{ base_url }}/v1/messages \
+  -H "X-User-Key: {{ user_key }}" \
+  -H "X-API-Token: YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"channel":"push","app":"default","body":"Hello from my gateway"}'</code></pre>
+  <button class="btn ghost sm" onclick="copyText(document.getElementById('snippet').textContent, this)">Copy</button>
+  <span class="muted" style="margin-left:8px">Email needs <code>to</code>, <code>subject</code> and <code>emailType</code>; SMS needs <code>to</code>.</span>
+</div>
+{% endblock %}

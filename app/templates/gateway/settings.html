@@ -1,0 +1,42 @@
+{% extends "gateway/base.html" %}
+{% block title %}Message Gateway - Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p class="sub">General options for this gateway. To connect or change email, SMS and push providers, use the <b>Channels</b> menu.</p>
+
+<div class="card">
+  <h2>Message log and sign-ups</h2>
+  <label class="row" style="color:var(--fg);font-size:14px;margin:0 0 10px;gap:10px;align-items:flex-start">
+    <input type="checkbox" id="storeContent" style="width:auto;margin-top:4px" {{ 'checked' if store_content }} />
+    <span><b>Keep a full message log</b><br /><span class="muted">Saves the subject and text of each message (encrypted). Turn off to log only time, recipient and status.</span></span>
+  </label>
+  <label class="row" style="color:var(--fg);font-size:14px;margin:0 0 10px;gap:10px;align-items:flex-start">
+    <input type="checkbox" id="allowSignups" style="width:auto;margin-top:4px" {{ 'checked' if allow_signups }} />
+    <span><b>Allow new sign-ups</b><br /><span class="muted">Off by default. When on, anyone who can reach this gateway can create an account. They can send messages but can't change settings.</span></span>
+  </label>
+  <label for="gpw">Your password (to confirm)</label>
+  <input id="gpw" type="password" autocomplete="current-password" style="max-width:300px" />
+  <div class="row"><button class="btn" id="saveGeneral">Save</button></div>
+  <div id="gout"></div>
+</div>
+
+<div class="card">
+  <h2>Database</h2>
+  <div class="kv">
+    <div class="k">Storage</div><div>{{ 'MongoDB Atlas (remote)' if backend == 'atlas' else 'Local (SQLite, on this computer)' }}</div>
+    <div class="k">Status</div><div><span class="badge {{ 'ready' if db_ok else 'failed' }}">{{ 'Connected' if db_ok else 'Not reachable' }}</span></div>
+  </div>
+  <p class="muted" style="margin:10px 0 0">The database can't be switched from here, because your accounts and message history live in it. To move to a different database, start a new gateway and set it up there.</p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById("saveGeneral").onclick = function (ev) {
+    var b = ev.target, out = document.getElementById("gout"); b.disabled = true;
+    window.MG.post("/gateway/settings/general", { store_content: document.getElementById("storeContent").checked, allow_signups: document.getElementById("allowSignups").checked, password: document.getElementById("gpw").value })
+      .then(function () { document.getElementById("gpw").value = ""; window.MG.say(out, "Saved.", "ok"); })
+      .catch(function (e) { window.MG.say(out, e.message, "err"); })
+      .then(function () { b.disabled = false; });
+  };
+</script>
+{% endblock %}

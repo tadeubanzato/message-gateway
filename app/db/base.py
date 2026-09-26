@@ -47,6 +47,20 @@ class Repository(ABC):
         ...
 
     @abstractmethod
+    def count_accounts(self) -> int:
+        ...
+
+    @abstractmethod
+    def oldest_account_id(self) -> Optional[str]:
+        """Id of the first-created account (the owner, for databases created
+        before owners were tracked explicitly)."""
+        ...
+
+    @abstractmethod
+    def set_password_hash(self, account_id: str, password_hash: str) -> None:
+        ...
+
+    @abstractmethod
     def push_token(self, account_id: str, token_doc: dict[str, Any]) -> None:
         ...
 
@@ -79,8 +93,19 @@ class Repository(ABC):
 
     @abstractmethod
     def list_messages(
-        self, channel: Optional[str], status: Optional[str], limit: int
+        self, channel: Optional[str], status: Optional[str], limit: int,
+        account_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
+        """Newest first. account_id, when given, restricts to that account's messages."""
+        ...
+
+    @abstractmethod
+    def get_message(self, message_id: str) -> Optional[dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    def update_message_fields(self, message_id: str, fields: dict[str, Any]) -> None:
+        """Merge fields into a message record (may include "status")."""
         ...
 
     @abstractmethod
@@ -100,6 +125,20 @@ class Repository(ABC):
         """Delete messages/attempts older than the given age. Returns count deleted.
         Mongo backend prefers a TTL index (this becomes a no-op there); SQLite
         backend must actively delete on a schedule since it has no TTL indexes."""
+        ...
+
+    # ---- settings (values are already encrypted by app.services.secret_store) ----
+    @abstractmethod
+    def list_settings(self) -> dict[str, dict[str, Any]]:
+        """All stored settings as {name: {"value_enc": str, "updated_at": float}}."""
+        ...
+
+    @abstractmethod
+    def set_setting(self, name: str, value_enc: str) -> None:
+        ...
+
+    @abstractmethod
+    def delete_setting(self, name: str) -> None:
         ...
 
     # ---- lifecycle ----

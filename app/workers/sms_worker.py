@@ -3,7 +3,7 @@ from app.workers.base_worker import run_worker
 
 
 def _deliver(msg: dict):
-    return get_sms_provider().send(
+    return get_sms_provider((msg.get("provider") or "").strip() or None).send(
         to=msg.get("to", ""),
         body=msg.get("body", ""),
         message_id=msg.get("message_id", ""),

@@ -13,12 +13,12 @@ import urllib.error
 import urllib.request
 from typing import Any, Optional
 
+from app.services.env import get_env
 from app.services.email.base import EmailProvider, EmailResult
 
 
 def _env(name: str, default: Optional[str] = None) -> Optional[str]:
-    v = os.getenv(name)
-    return default if v is None or v == "" else v
+    return get_env(name, default)
 
 
 def _basic_auth_header(api_key: str, secret_key: str) -> str:

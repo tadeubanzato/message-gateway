@@ -16,7 +16,7 @@ def _deliver(msg: dict):
     meta = msg.get("meta")
     if not isinstance(meta, dict):
         meta = {}
-    return get_push_provider().send(
+    return get_push_provider((msg.get("provider") or "").strip() or None).send(
         body=msg.get("body", ""),
         title=_resolve_title(msg),
         app=msg.get("app"),
