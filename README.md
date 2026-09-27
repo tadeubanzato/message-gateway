@@ -5,13 +5,15 @@ One Docker container, one place to connect your providers, and a full log of eve
 that was sent. You set it up in your browser: there is no config file to edit, and your
 credentials are stored **encrypted** in the database you choose.
 
-- **Three channels, several providers each.** Email (Mailjet, SendGrid), SMS (Twilio,
-  Infobip, or your own HTTP endpoint) and push (Pushover, ntfy). Connect more than one
-  per channel and pick a default, or choose per message.
-- **Message log.** Every message: time, recipient, content (encrypted), status, provider,
-  attempts and errors.
+- **Three channels, several providers each.** Email (Mailjet, SendGrid), SMS (your own HTTP
+  endpoint, Twilio, Infobip or Sinch) and push (Pushover, ntfy). Connect more than one per
+  channel, pick a default, or choose per message - and turn any connected provider on or off
+  without disconnecting it.
+- **Dashboard.** A per-channel message trend chart on Home, and a full message log: time,
+  recipient, content (encrypted), status, provider, attempts and errors.
 - **Works with AI agents.** Connect Claude Code (or any MCP client) and just say
-  "send me a push notification" or "text +1 555 123 4567".
+  "send me a push notification" or "text +1 555 123 4567". It can also check delivery status,
+  read recent messages and help troubleshoot a failed send.
 - **Reliable.** Failed deliveries retry with backoff, then land in a dead-letter queue.
 
 ---
@@ -96,6 +98,13 @@ You can connect several providers on one channel: use **+ Add another provider**
 (`••••••••1a2b`) so you can compare with the key in your provider's dashboard. Type a new
 value to replace one, or leave the field blank to keep it.
 
+**Turn a provider on or off.** Every connected provider's card has a colored **Enabled**/**Disabled**
+pill - click it to flip it. A disabled provider stays connected and configured, it's just refused
+for sending: a message that would use it (named explicitly, or picked as the channel's default)
+gets a `403` with a clear reason, everywhere (the API, MCP, and **Send test**). The Home page and
+the channel page show green **Ready** when every connected provider is on, amber **Ready** when
+only some are, and red **Disabled** when all of them are off.
+
 ### Email
 
 | Provider | What you need |
@@ -105,13 +114,20 @@ value to replace one, or leave the field blank to keep it.
 
 ### SMS
 
+**Custom API endpoint** is the default - most people either have their own SMS service already or
+would rather not create a Twilio/Infobip/Sinch account just to try the gateway.
+
 | Provider | What you need |
 |---|---|
+| **Custom API endpoint** | Your own SMS service. See below |
 | **Twilio** | Account SID and auth token (Twilio console), and a Twilio phone number to send from |
-| **Infobip** | API key, your base URL and a sender ID (Infobip portal) |
-| **Custom HTTP endpoint** | Your own SMS service. See below |
+| **Infobip** | API key, your account's base URL and a sender ID (Infobip portal) |
+| **Sinch** | Service Plan ID, an API token, the region your plan was created in (US/EU/AU/BR/CA), and a from number or sender ID (Sinch dashboard) |
 
-**Your own SMS endpoint.** Choose *Custom HTTP endpoint*, then enter:
+**Your own SMS endpoint.** Choose *Custom API endpoint*, then either paste a working `curl`
+command for your service and click **Fill in from curl** - it fills in the URL, method and
+headers, and swaps recognizable body fields (`number`/`to`/`phone`, `message`/`text`/`body`,
+`message_id`/`id`/`ref`...) for the gateway's placeholders - or fill the fields in yourself:
 
 - **Endpoint URL** and **HTTP method** (POST, PUT or PATCH)
 - **Headers**, one per line, for example `Authorization: Bearer <token>` (stored encrypted)
@@ -123,7 +139,7 @@ value to replace one, or leave the field blank to keep it.
   | `{{to}}` | the phone number, e.g. `+15551234567` |
   | `{{to_digits}}` | digits only, e.g. `15551234567` |
   | `{{message}}` | the message text |
-  | `{{message_id}}` | the gateway's id for the message |
+  | `{{message_id}}` | the gateway's id for the message (the same one in the message log and on the RabbitMQ payload, for troubleshooting) |
 
   ```json
   {"number": "{{to}}", "message": "{{message}}"}
@@ -228,15 +244,20 @@ a clear error instead of queueing a message that can't be delivered.
 
 ## 5. Connect an AI agent (MCP)
 
-The MCP server lets an AI agent send messages and check delivery. It uses the **same key and
-token** as the API, so connecting is one command. The last setup screen (and every new key)
-shows it ready to copy. Run it **in your own terminal** (it contains your token), then restart
-Claude Code or run `/mcp`:
+The MCP server lets an AI agent send messages, check delivery, and help troubleshoot. It uses
+the **same key and token** as the API, so connecting is one command. The last setup screen (and
+every new key) shows it ready to copy. Run it **in your own terminal** (it contains your token),
+then restart Claude Code or run `/mcp`:
 
 ```bash
 claude mcp add --transport http message-gateway http://localhost:8010/mcp \
   --header "X-User-Key: <your user key>" --header "X-API-Token: <your api token>"
 ```
+
+(Use your gateway's real address here - a server IP, a domain, a tunnel - not `localhost`, unless
+that's genuinely where you're running it. The **About** page in the web app always shows yours
+correctly, plus a short prompt you can paste into any MCP-capable agent instead of the command
+above.)
 
 Then just ask, for example:
 
@@ -248,7 +269,9 @@ Then just ask, for example:
 
 Each send waits a few seconds and reports **delivered** or **failed** with the reason. Phone
 numbers can be typed any way (`+1 (555) 123-4567`); a number without a country code is never
-guessed, the agent is told to ask for it.
+guessed, the agent is told to ask for it. If the provider that would send it (named, or the
+channel's default) is turned off, the agent gets a clear "X is turned off on the gateway" reason
+instead - the same `403` the HTTP API returns.
 
 | Tool | Use |
 |---|---|
@@ -262,12 +285,16 @@ Provider credentials are never handled through MCP: they are entered in the web 
 
 ## 6. Day to day
 
-- **Home**: channel status, recent messages, a copyable send example.
+- **Home**: channel status (including a red/amber/green read on whether any connected provider
+  is turned off), a messages-by-channel trend chart, a copyable send example.
 - **Message log**: search and filter everything sent; click a message for its delivery attempts.
   Messages sent with **Send test** are logged too, with a small **Test** label, and a
   **Hide tests** filter.
-- **API keys**: create, replace or delete keys. A replaced token stops working immediately.
-- **Settings** (user menu, administrator): keep or drop message content, allow sign-ups, import an old `.env`.
+- **API keys** (user menu): click an app's name to rename it in place - it saves itself, no
+  Save button. Create, replace or delete keys; a replaced token stops working immediately.
+- **Settings** (user menu, administrator): keep or drop message content, allow sign-ups, set a
+  public address override for the About page and MCP URL (see [Reference](#9-reference)),
+  import an old `.env`.
 - **Account** (user menu): your profile and password.
 
 Manage the container from the project folder:
@@ -293,8 +320,11 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
   `docker compose cp gateway:/app/data ./gateway-backup` and keep that copy private. If the
   key is lost while a remote database is kept, the app tells you which credentials can't be
   read so you can enter them again.
-- **MCP uses your API key.** Tools act only on your own messages; queue, dead-letter and
-  provider-check tools are administrator-only.
+- **MCP uses your API key.** Tools that read messages (`list_recent_messages`, `get_message`,
+  `list_delivery_attempts`) only see messages sent under the connecting account's own keys, even
+  for the administrator; queue, dead-letter and provider-check tools are administrator-only.
+- **Turning a provider off doesn't remove it.** Its credentials stay saved and encrypted; a
+  disabled provider just refuses to send until you turn it back on.
 - Recipients (emails, phone numbers) are stored in plain text so they can be searched.
   Subjects, bodies and credentials are encrypted.
 - The gateway calls provider APIs, and your custom SMS URL, from your machine.
@@ -309,6 +339,7 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
 | Red banner: "not on a persistent volume" | You started it without `install.sh`; use `./install.sh` so data survives |
 | "N saved credentials can't be read" | The encryption key changed (volume replaced); enter them again on the Channels pages. Old API keys may need re-creating |
 | A send returns "No … provider is connected" | The administrator connects one under Channels |
+| A send returns "… is turned off on the gateway" | That provider is connected but switched off - click its Enabled/Disabled pill on the Channels page to turn it back on, or pick a different connected provider with `"provider"` |
 | Mail is rejected | The sender address must be verified with Mailjet/SendGrid |
 | SMS says "failed" with your endpoint | Check the URL, headers and body preview; add or fix the "response must contain" text |
 | Forgot the administrator password | Passwords can't be reset by email; restore from a backup, or reinstall with `docker compose down -v` |
@@ -322,6 +353,12 @@ You don't need a `.env` file. To pin a setting from the environment, copy `.env.
 `.env`, uncomment only what you need, and run `docker compose up -d --force-recreate`
 (`restart` doesn't reload it). Anything set there **overrides** the browser settings, which
 then can't change it (the Channels page tells you when that happens).
+
+**Public address.** The About page and the MCP URL default to whatever address you're browsing
+from - a server IP, a domain, a tunnel address all just work automatically. If you're behind a
+reverse proxy or tunnel that doesn't forward the original address, so the gateway only ever sees
+its own internal one, set it once in **Settings → Public address** (or `PUBLIC_BASE_URL` in
+`.env` for a locked-down install).
 
 ### API documentation
 
@@ -342,9 +379,12 @@ app/
   routes/            first-run setup, login and keys, portal pages
   services/          channels, encrypted settings, message log, providers
     sms/custom_http  your own SMS endpoint (URL, headers, JSON pattern)
+    sms/sinch, twilio, infobip  the other SMS providers
   workers/           email / sms / push consumers (retry + dead letters)
   mcp_server/        MCP tools and their key-based login
-  templates/, static/  pages, shared stylesheet and script
+  templates/         pages (Jinja)
+  static/            shared stylesheet and script; static/vendor/ has Chart.js,
+                     vendored so the gateway has no runtime CDN dependency
 ```
 
 ## License
