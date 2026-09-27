@@ -167,12 +167,16 @@ straight away, because **it is shown only once** and only a hash is stored. Lost
 every request, and a wrong or revoked pair gets a `401`. Then:
 
 ```bash
-curl -X POST http://localhost:8010/v1/messages \
+curl -X POST http://localhost:8010/v1/messages/push \
   -H "X-User-Key: <your user key>" \
   -H "X-API-Token: <your api token>" \
   -H "Content-Type: application/json" \
-  -d '{"channel": "push", "subject": "Hello", "body": "It works!"}'
+  -d '{"subject": "Hello", "body": "It works!"}'
 ```
+
+Each channel has its own endpoint: `POST /v1/messages/push`, `/v1/messages/email`,
+`/v1/messages/sms`, and `/v1/messages/email/template` and `/v1/messages/sms/template` for saved templates.
+The API reference at `/scalar` documents each one.
 
 | Channel | Fields |
 |---|---|

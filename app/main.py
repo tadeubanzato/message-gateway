@@ -109,6 +109,35 @@ curl -X POST http://localhost:8010/v1/messages/sms \
 
 To try requests from this page, click **Authenticate** and enter both values.
 
+## Responses and errors
+
+A successful send returns `200` right away with `status: "queued"`: the message is validated, logged and
+delivered in the background, with retries.
+
+```json
+{ "status": "queued", "message_id": "6f1c2b0e-..." }
+```
+
+**Several recipients.** `to` may be a list. Duplicates are removed and each recipient gets its own message, so the
+response has `message_ids` (one per recipient) and `to_deduped` instead of `message_id`.
+
+**Checking delivery.** Delivery is asynchronous, so `queued` does not mean delivered. See the result and every
+attempt on the **Messages** page of the web app (`/gateway/messages`).
+
+Errors return JSON with a `detail`:
+
+| Status | Meaning | Example `detail` |
+|---|---|---|
+| `400` | Bad request: missing or invalid field, unknown provider, unknown app, unknown template, missing `context` value | `{"error": "Provider 'foo' isn't set up for email.", "available": ["sendgrid"], "default": "sendgrid"}` |
+| `401` | Missing, wrong or revoked `X-User-Key` / `X-API-Token` | `"Unauthorized"` |
+| `409` | No provider is connected for the channel yet (an administrator connects one in the web app) | `{"error": "No sms provider is connected yet...", "available": [], "default": "twilio"}` |
+| `422` | The JSON body is malformed or a required field is missing | FastAPI validation details |
+
+## AI agents (MCP)
+
+AI agents can send through the same gateway over MCP at `/mcp`, with the same two headers. The
+`/get-started` page has a ready-to-paste prompt and setup steps.
+
 ## Quick start
 
 Pick the endpoint for your channel: **Email**, **SMS** or **Push**. Email and SMS each have a plain-text endpoint and a template endpoint.
@@ -122,7 +151,9 @@ API_TAGS = [
     {"name": "Push", "description": "Send a push notification."},
 ]
 
-app = FastAPI(title=APP_NAME, version=APP_VERSION, description=API_DESCRIPTION, openapi_tags=API_TAGS, lifespan=_lifespan,
+GATEWAY_BASE_URL = (os.environ.get("GATEWAY_BASE_URL") or "http://localhost:8010").strip().rstrip("/")
+
+app = FastAPI(title=APP_NAME, servers=[{"url": GATEWAY_BASE_URL, "description": "This gateway"}], version=APP_VERSION, description=API_DESCRIPTION, openapi_tags=API_TAGS, lifespan=_lifespan,
               docs_url=None, redoc_url=None)  # Scalar (/scalar) is the one API reference
 
 # The MCP endpoint requires the same API key and token as the HTTP API.
@@ -386,6 +417,7 @@ def enqueue_message(req: MessageRequest, account_id: Optional[str]) -> MessageRe
 
 
 _SEND_RESPONSES = {
+    200: {"description": "Queued for delivery. `message_id` identifies the message; with several recipients you get `message_ids` instead."},
     400: {"description": "Invalid request (missing recipient, unknown provider, bad address...)."},
     401: {"description": "Missing or invalid `X-User-Key` / `X-API-Token`."},
     409: {"description": "No provider is connected for this channel yet. The administrator connects one in the web app."},

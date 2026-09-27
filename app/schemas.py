@@ -121,7 +121,7 @@ class EmailMessage(_ChannelMessage):
     subject: str = Field(description="Subject line.")
     body: str = Field(description="The message text.")
     emailType: EmailType = Field("txt", description="`txt` (default) or `html`.")
-    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " E.g. `sendgrid`.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `sendgrid`, `mailjet` (only the ones connected in the web app work).")
 
 
 class EmailTemplateMessage(_ChannelMessage):
@@ -131,22 +131,22 @@ class EmailTemplateMessage(_ChannelMessage):
     template: str = Field(description=_EMAIL_TEMPLATE_DESC)
     context: dict[str, Any] = Field(default_factory=dict, description=_CONTEXT_DESC)
     emailType: EmailType = Field("txt", description="`txt` (default) loads `<name>.txt`; `html` loads `<name>.html`.")
-    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " E.g. `sendgrid`.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `sendgrid`, `mailjet` (only the ones connected in the web app work).")
 
 
 class SmsMessage(_ChannelMessage):
     _channel = "sms"
-    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number with country code, e.g. `+15551234567`, or a list. Omit to use the default phone number set in the web app.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567` (digits only after the `+`), or a list. The API sends it as given and does not guess a country code. Omit to use the default phone number set in the web app.")
     body: str = Field(description="The message text.")
-    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " E.g. `twilio`.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `twilio`, `infobip`, `custom_http` (only the ones connected in the web app work).")
 
 
 class SmsTemplateMessage(_ChannelMessage):
     _channel = "sms"
-    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number with country code, e.g. `+15551234567`, or a list. Omit to use the default phone number set in the web app.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567` (digits only after the `+`), or a list. The API sends it as given and does not guess a country code. Omit to use the default phone number set in the web app.")
     template: str = Field(description=_SMS_TEMPLATE_DESC)
     context: dict[str, Any] = Field(default_factory=dict, description=_CONTEXT_DESC)
-    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " E.g. `twilio`.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `twilio`, `infobip`, `custom_http` (only the ones connected in the web app work).")
 
 
 class PushMessage(_ChannelMessage):
@@ -158,7 +158,7 @@ class PushMessage(_ChannelMessage):
     url: Optional[str] = Field(None, description="A link to attach (http:// or https://).")
     url_title: Optional[str] = Field(None, description="Pushover only: text for the attached link.")
     to: Optional[str] = Field(None, description="Override the recipient: a Pushover user or group key, or an ntfy topic. Default: the one saved in the web app.")
-    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " `pushover` or `ntfy`.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `pushover`, `ntfy` (only the ones connected in the web app work).")
 
 
 class MessageEnqueued(BaseModel):
