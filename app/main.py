@@ -131,18 +131,42 @@ Errors return JSON with a `detail`:
 |---|---|---|
 | `400` | Bad request: missing or invalid field, unknown provider, unknown app, unknown template, missing `context` value | `{"error": "Provider 'foo' isn't set up for email.", "available": ["sendgrid"], "default": "sendgrid"}` |
 | `401` | Missing, wrong or revoked `X-User-Key` / `X-API-Token` | `"Unauthorized"` |
-| `409` | No provider is connected for the channel yet (an administrator connects one in the web app) | `{"error": "No sms provider is connected yet...", "available": [], "default": "twilio"}` |
+| `403` | The provider that would send this - the one you named, or the channel's default - is turned off (Channels > that channel > that provider's card) | `{"error": "Mailjet is turned off on the gateway.", "channel": "email", "provider": "mailjet"}` |
+| `409` | No provider is connected for the channel yet (an administrator connects one in the web app) | `{"error": "No sms provider is connected yet...", "available": [], "default": "custom_http"}` |
 | `422` | The JSON body is malformed or a required field is missing | FastAPI validation details |
 
 ## AI agents (MCP)
 
-AI agents can send through the same gateway over MCP at `/mcp`, with the same two headers. The
-`/get-started` page has a ready-to-paste prompt and setup steps.
+The gateway runs an [MCP](https://modelcontextprotocol.io) server at `/mcp` (streamable HTTP), registered as
+**message-gateway**, secured with the same `X-User-Key` / `X-API-Token` headers as the HTTP API above. Any
+MCP-capable agent - Claude Code, Codex, Claude Desktop, ChatGPT with a custom connector - can connect to it directly;
+no separate install or SDK needed.
+
+```
+claude mcp add --transport http message-gateway http://localhost:8010/mcp \
+  --header "X-User-Key: gw_user_..." --header "X-API-Token: gw_tok_..."
+```
+
+That exact command (with your real values) is shown once right after you create or replace an API key, and the
+**About** page in the web app has a short natural-language prompt you can paste into any agent instead. Once
+connected, an agent discovers the available tools itself; broadly, they cover:
+
+- **Sending** - `send_email`, `send_sms`, `send_push`, `send_test`, and a general `send_notification`. Same
+  validation, logging and on/off checks as this REST API - a message through a turned-off provider gets the same
+  `403` shown above.
+- **Discovery** - `list_providers`, `get_setup_status`, `get_setup_instructions`, `get_health`.
+- **Your message history** - `list_recent_messages`, `get_message`, `list_delivery_attempts` (scoped to messages
+  sent under the connecting account's own keys).
+- **Administrator troubleshooting** (the gateway owner's key only) - `check_provider_config`, `get_queue_status`,
+  `list_dead_letters`, `retry_dead_letter`.
+
+Provider credentials, API keys, and settings are never exposed through MCP - those stay in the web app.
 
 ## Quick start
 
 Pick the endpoint for your channel: **Email**, **SMS** or **Push**. Email and SMS each have a plain-text endpoint and a template endpoint.
-Add `provider` to choose a specific connected provider; without it the channel's default is used.
+Add `provider` to choose a specific connected provider; without it the channel's default is used, unless it's
+turned off (`403`) - see **Errors** above.
 Delivery happens in the background and the response returns a `message_id`.
 """
 

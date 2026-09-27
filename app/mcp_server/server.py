@@ -55,6 +55,10 @@ mcp = FastMCP(
         "waits a few seconds and reports delivered or failed, so you can tell the user the outcome. "
         "Use list_providers to see what is connected (and pass provider= to choose one). If a "
         "channel isn't set up, tell the user the administrator must connect it in the web app. "
+        "A send can also fail with 'X is turned off on the gateway': that provider is connected but "
+        "an administrator switched it off (Channels > that channel > that provider's card) - tell the "
+        "user which provider and that they (or the administrator) can turn it back on there, or pick a "
+        "different connected provider with provider=. "
         "Provider credentials are managed in the web app, never through this server: never ask "
         "the user to paste keys or passwords into chat."
     ),
