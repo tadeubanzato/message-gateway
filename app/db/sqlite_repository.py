@@ -215,6 +215,26 @@ class SqliteRepository(Repository):
             )
             self._conn().commit()
 
+    def rename_token_app(self, account_id: str, app_filter_fn, new_app: str) -> None:
+        acct = self.find_account_by_id(account_id)
+        if not acct:
+            return
+        svc = ((acct.get("services") or {}).get("message-gateway") or {})
+        tokens = svc.get("tokens") or []
+        changed = False
+        for t in tokens:
+            if not isinstance(t, dict):
+                continue
+            if t.get("revoked_at") is None and app_filter_fn(t):
+                t["app"] = new_app
+                changed = True
+        if changed:
+            self._conn().execute(
+                "UPDATE accounts SET doc = ? WHERE id = ?",
+                (json.dumps(acct, default=_json_default), account_id),
+            )
+            self._conn().commit()
+
     # ---- portal sessions ----
     def create_session(self, session_doc: dict[str, Any]) -> None:
         self._conn().execute(

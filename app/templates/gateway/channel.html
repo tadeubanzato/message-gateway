@@ -19,18 +19,90 @@
   const CH = D.channel, SPEC = D.spec, LABEL = D.label;
   const $ = (s, r = document) => r.querySelector(s);
   const { post, say } = window.MG;
-  const STATE = { ready: "Ready", needs_attention: "Needs attention", not_set_up: "Not set up" };
   let status = D.status;
   // What the page is showing: the list of connected providers, or the "add a provider" flow.
-  const ui = { adding: false, chosen: null, editing: null, flash: null };
+  const ui = { adding: false, chosen: null, flash: null };
 
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
   const providerLabel = (name) => SPEC.providers[name].label;
 
+  // ---------------- "paste a curl command" -> pre-filled custom-endpoint fields ----------------
+  // A small best-effort shell-style tokenizer: joins backslash line continuations, and
+  // honors single/double-quoted arguments (curl examples are usually copy-pasted whole).
+  function tokenizeCurl(input) {
+    const s = input.replace(/\\\r?\n/g, " ");
+    const tokens = []; let i = 0; const n = s.length;
+    while (i < n) {
+      while (i < n && /\s/.test(s[i])) i++;
+      if (i >= n) break;
+      const q = s[i];
+      if (q === '"' || q === "'") {
+        i++; let buf = "";
+        while (i < n && s[i] !== q) {
+          if (q === '"' && s[i] === "\\" && i + 1 < n) { buf += s[i + 1]; i += 2; }
+          else { buf += s[i]; i++; }
+        }
+        i++; tokens.push(buf);
+      } else {
+        const start = i;
+        while (i < n && !/\s/.test(s[i])) i++;
+        tokens.push(s.slice(start, i));
+      }
+    }
+    return tokens;
+  }
+  // Common JSON key spellings for the three things every SMS API needs: who it
+  // goes to, what it says, and an ID to correlate back to this gateway's log.
+  const CURL_PHONE_KEYS = ["number", "to", "phone", "phone_number", "recipient", "destination", "msisdn", "dest"];
+  const CURL_MESSAGE_KEYS = ["message", "text", "body", "content", "sms", "msg"];
+  const CURL_MSGID_KEYS = ["message_id", "messageid", "id", "ref", "reference", "client_ref", "external_id", "correlation_id"];
+  function curlMapBody(value, mapped) {
+    if (Array.isArray(value)) return value.map(v => (v && typeof v === "object") ? curlMapBody(v, mapped) : v);
+    const out = {};
+    for (const k of Object.keys(value)) {
+      const norm = k.toLowerCase().replace(/[-\s]/g, "_");
+      const v = value[k];
+      if (v && typeof v === "object") { out[k] = curlMapBody(v, mapped); continue; }
+      if (CURL_PHONE_KEYS.includes(norm)) { out[k] = "{{to}}"; mapped.push(k); }
+      else if (CURL_MESSAGE_KEYS.includes(norm)) { out[k] = "{{message}}"; mapped.push(k); }
+      else if (CURL_MSGID_KEYS.includes(norm)) { out[k] = "{{message_id}}"; mapped.push(k); }
+      else out[k] = v;
+    }
+    return out;
+  }
+  function parseCurl(input) {
+    const tokens = tokenizeCurl(input.trim());
+    if (tokens[0] === "curl") tokens.shift();
+    let method = null, url = null, body = null;
+    const headers = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (t === "-X" || t === "--request") method = (tokens[++i] || "").toUpperCase();
+      else if (t === "-H" || t === "--header") headers.push(tokens[++i] || "");
+      else if (t === "-d" || t === "--data" || t === "--data-raw" || t === "--data-binary" || t === "--data-ascii") body = tokens[++i];
+      else if (t === "-u" || t === "--user") i++;
+      else if (!url && /^https?:\/\//.test(t)) url = t;
+    }
+    if (!method || !["POST", "PUT", "PATCH"].includes(method)) method = "POST";
+    const keptHeaders = headers.filter(h => !/^content-type\s*:/i.test(h));
+    let bodyOut = body, mapped = null;
+    if (body) {
+      try {
+        const obj = JSON.parse(body);
+        mapped = [];
+        bodyOut = JSON.stringify(curlMapBody(obj, mapped), null, 2);
+        if (!mapped.length) mapped = null;
+      } catch (e) { /* not JSON (or not valid) - leave the raw pasted text for the person to fix */ }
+    }
+    if (!url) throw new Error("No http:// or https:// URL found in that command.");
+    return { url, method, headers: keptHeaders, body: bodyOut, mapped };
+  }
+
   function header() {
-    $("#chBadge").className = "badge " + status.state; $("#chBadge").textContent = STATE[status.state];
+    $("#chBadge").className = "badge " + status.state_css; $("#chBadge").textContent = status.state_label;
     $("#chSummary").textContent = status.state === "not_set_up" ? "Not connected yet. Choose a provider to start sending " + LABEL.toLowerCase() + "."
-      : status.state === "ready" ? "Messages go through " + status.default_label + (status.connected.length > 1 ? " unless a message picks another connected provider." : ".")
+      : status.state === "disabled" ? "Every connected provider is turned off. Turn one back on below to start sending again."
+      : (status.state === "ready" || status.state === "ready_degraded") ? "Messages go through " + status.default_label + (status.connected.length > 1 ? " unless a message picks another connected provider." : ".") + (status.state === "ready_degraded" ? " Some connected providers are turned off." : "")
       : "The default provider (" + status.default_label + ") isn't connected. Make a connected provider the default, or connect it.";
   }
 
@@ -70,6 +142,38 @@
       const n = el("div", "msg", "These settings come from environment variables and override what you save here: " + p.env_locked.join(", ") + ". Remove them from your .env file and recreate the container to manage them on this page.");
       n.style.cssText = "background:var(--warnbg);color:var(--warn);margin:10px 0 0"; fields.appendChild(n);
     }
+    if (spec.curl_paste) {
+      const cw = el("div"); cw.style.cssText = "background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;margin:0 0 16px";
+      const cl = el("label", "", "Paste a curl command"); cl.style.marginTop = "0";
+      const ch = el("p", "help", "Paste a working curl example for your SMS API and we'll fill in the fields below: the endpoint, method, headers and a sample body, with the phone number, message and message ID swapped for placeholders where we recognize them. Review the result before saving.");
+      ch.style.margin = "0 0 8px";
+      const ta = el("textarea"); ta.rows = 4; ta.spellcheck = false; ta.autocomplete = "off";
+      ta.style.cssText = "width:100%;font-family:ui-monospace,monospace;font-size:13px";
+      ta.placeholder = 'curl -X POST https://sms.example.com/api/send \\\n  -H "Authorization: Bearer YOUR_TOKEN" \\\n  -d \'{"number": "+15551234567", "message": "Hello", "message_id": "abc123"}\'';
+      const btnRow = el("div", "row"); btnRow.style.marginTop = "8px";
+      const fillBtn = el("button", "btn ghost sm", "Fill in from curl"); fillBtn.type = "button";
+      const out = el("div");
+      btnRow.appendChild(fillBtn);
+      cw.append(cl, ch, ta, btnRow, out);
+      fields.appendChild(cw);
+      fillBtn.onclick = () => {
+        const raw = ta.value.trim();
+        if (!raw) { say(out, "Paste a curl command first.", "err"); return; }
+        try {
+          const parsed = parseCurl(raw);
+          const setField = (name, value) => {
+            const i = fields.querySelector('[data-name="' + name + '"]');
+            if (i && value !== undefined && value !== null) { i.value = value; i.dispatchEvent(new Event("input")); }
+          };
+          setField("CUSTOM_SMS_URL", parsed.url);
+          setField("CUSTOM_SMS_METHOD", parsed.method);
+          setField("CUSTOM_SMS_HEADERS", parsed.headers.join("\n"));
+          if (parsed.body !== null) setField("CUSTOM_SMS_BODY", parsed.body);
+          if (parsed.mapped) say(out, 'Filled in below. In the body, "' + parsed.mapped.join('", "') + '" ' + (parsed.mapped.length > 1 ? "were" : "was") + " swapped for placeholders - check it before saving.", "ok");
+          else say(out, "Filled in below, but we couldn't tell which part of the body is the phone number, message or message ID - add {{to}}, {{message}} and {{message_id}} yourself.", "err");
+        } catch (e) { say(out, "Couldn't read that: " + e.message, "err"); }
+      };
+    }
     for (const f of spec.fields) {
       const l = el("label", "", f.label + (f.optional ? " (optional)" : ""));
       let i;
@@ -79,9 +183,8 @@
       i.dataset.name = f.name; i.autocomplete = "off"; if (f.placeholder) i.placeholder = f.placeholder;
       const st = state[f.name] || {};
       if (st.set && st.value) i.value = st.value;                       // non-secret values are shown so they can be edited
-      else if (st.set) {                                                // secrets are never shown again, only their last 4 characters
-        i.placeholder = "Saved. Type to replace";
-        if (st.last4) l.appendChild(el("span", "tail", "••••••••" + st.last4)); else l.appendChild(el("span", "tail", "•••••••• saved"));
+      else if (st.set) {                                                // secrets are never shown again: show the last 4 characters in the field itself, not as a separate label
+        i.placeholder = st.last4 ? "••••••••" + st.last4 : "•••••••• saved";
       }
       else if (f.default && i.tagName === "SELECT") i.value = f.default;
       fields.append(l, i);
@@ -110,18 +213,21 @@
       appRows = $("[data-apps]", wrap);
       const relabel = () => [...appRows.children].forEach((r, i) => {
         $("[data-role]", r).textContent = i === 0 ? "Default app" : "Additional app";
-        $("[data-appdefault]", r).classList.toggle("hidden", i === 0);
-        $("[data-appremove]", r).classList.toggle("hidden", i === 0);
+        // Keep the actions column reserved (not display:none'd) even on the default row, so
+        // every row's name/token fields size the same and line up instead of drifting wider.
+        const def = $("[data-appdefault]", r), rem = $("[data-appremove]", r);
+        def.classList.toggle("invisible", i === 0); def.disabled = i === 0;
+        rem.classList.toggle("invisible", i === 0); rem.disabled = i === 0;
       });
       const addRow = (a) => {
         const row = el("div", "row"); row.style.cssText = "gap:8px;margin-bottom:8px;align-items:flex-end";
-        row.innerHTML = `<div style="flex:1;min-width:120px"><small class="muted" data-role></small><input data-appname placeholder="app name (e.g. alerts)" autocomplete="off" /></div>
-          <div style="flex:2;min-width:150px"><small class="muted" data-tokenlabel>API token</small><input data-apptoken type="password" autocomplete="off" /></div>
-          <div class="row" style="gap:6px"><button type="button" class="btn ghost sm" data-appdefault title="Use this app when a message doesn't name one">Make default</button><button type="button" class="btn danger sm" data-appremove title="Remove this app">×</button></div>`;
+        row.innerHTML = `<div style="flex:1;min-width:120px;max-width:220px"><small class="muted" data-role></small><input data-appname placeholder="app name (e.g. alerts)" autocomplete="off" /></div>
+          <div style="flex:2;min-width:150px"><small class="muted">API token</small><input data-apptoken type="password" autocomplete="off" /></div>
+          <div class="row" style="gap:6px;flex:none"><button type="button" class="btn ghost sm" data-appdefault title="Use this app when a message doesn't name one">Make default</button><button type="button" class="btn danger sm" data-appremove title="Remove this app">×</button></div>`;
         const nm = $("[data-appname]", row), tk = $("[data-apptoken]", row);
         nm.value = a.name; if (!a.isNew) { nm.readOnly = true; nm.style.opacity = ".7"; }
-        tk.placeholder = a.set ? "Saved. Type to replace" : "paste the app's API token";
-        if (a.set) $("[data-tokenlabel]", row).appendChild(el("span", "tail", a.last4 ? "••••••••" + a.last4 : "•••••••• saved"));
+        // secrets are never shown again: show the last 4 characters in the field itself, not as a separate label
+        tk.placeholder = a.set ? (a.last4 ? "••••••••" + a.last4 : "•••••••• saved") : "paste the app's API token";
         $("[data-appdefault]", row).onclick = () => { appRows.prepend(row); relabel(); };
         $("[data-appremove]", row).onclick = () => { row.remove(); relabel(); };
         appRows.appendChild(row); relabel();
@@ -146,7 +252,7 @@
       try {
         const r = await post("/gateway/channels/" + CH + "/save", { provider: p.name, values, ...extra });
         if (r.status) status = r.status;
-        if (r.ok) { ui.adding = false; ui.chosen = null; ui.editing = null; ui.flash = { text: providerLabel(p.name) + " is connected. The provider accepted these credentials. Use Send test to confirm a message arrives.", kind: "ok" }; render(); }
+        if (r.ok) { ui.adding = false; ui.chosen = null; ui.flash = { text: providerLabel(p.name) + " is connected. The provider accepted these credentials. Use Send test to confirm a message arrives.", kind: "ok" }; render(); }
         else say(out, (r.error || "The provider rejected these credentials.") + (r.status && r.status.connected.some(c => c.name === p.name) ? " Your entries were saved; fix them and try again." : ""), "err");
       } catch (e) { say(out, e.message, "err"); } finally { save.disabled = false; save.textContent = label; }
     };
@@ -179,28 +285,37 @@
     const card = el("div", "pcard" + (p.is_default ? " is-default" : "")); card.id = p.name;
     const head = el("div", "row between"); head.appendChild(el("h3", "", spec.label));
     const badges = el("span", "row"); badges.style.gap = "6px";
-    if (p.is_default) badges.appendChild(el("span", "badge default", "Default"));
     badges.appendChild(el("span", "badge connected", "Connected"));
+    // Click the pill to flip it - no separate switch. Colored like every other status pill.
+    const enabledBadge = document.createElement("button"); enabledBadge.type = "button";
+    enabledBadge.className = "badge " + (p.enabled ? "ready" : "disabled");
+    enabledBadge.textContent = p.enabled ? "Enabled" : "Disabled";
+    enabledBadge.title = "Click to " + (p.enabled ? "disable" : "enable") + " " + spec.label;
+    badges.appendChild(enabledBadge);
     head.appendChild(badges); card.appendChild(head);
     const sum = el("p", "muted", summarize(p)); sum.style.margin = "6px 0 0"; card.appendChild(sum);
 
     const actions = el("div", "actions"); card.appendChild(actions);
     const out = el("div"); card.appendChild(out);
     const btn = (text, cls, fn) => { const b = el("button", "btn " + cls, text); b.type = "button"; b.onclick = () => fn(b); actions.appendChild(b); return b; };
-    const act = async (b, path, body) => {   // Make default / Remove: the logged-in administrator session is enough
+    const act = async (b, path, body) => {   // Make default / Remove / on-off: the logged-in administrator session is enough
       const label = b.textContent; b.disabled = true;
       try { const r = await post("/gateway/channels/" + CH + path, { provider: p.name, ...body }); if (r.status) status = r.status; return r; }
       catch (e) { say(out, e.message, "err"); return null; } finally { b.disabled = false; b.textContent = label; }
     };
+    enabledBadge.onclick = async () => {
+      const r = await act(enabledBadge, "/provider/enabled", { enabled: !p.enabled });
+      if (r) { if (r.ok) render(); else say(out, r.error || "Could not save.", "err"); }
+    };
     btn("Send test", "", () => window.MG.openTest(CH, LABEL, status.connected, status.default, p.name, p.apps));
     if (!p.is_default) btn("Make default", "ghost", async (b) => { const r = await act(b, "/default", {}); if (r) { if (r.ok) { ui.flash = { text: spec.label + " is now the default.", kind: "ok" }; render(); } else say(out, r.error, "err"); } });
-    btn(ui.editing === p.name ? "Close" : "Edit", "ghost", () => { ui.editing = ui.editing === p.name ? null : p.name; render(); });
     let armed = false;
     btn("Remove", "danger", async (b) => {
       if (!armed) { armed = true; b.textContent = "Click again to remove"; setTimeout(() => { armed = false; b.textContent = "Remove"; }, 4000); return; }
       const r = await act(b, "/remove", {}); if (r) { if (r.ok) { ui.flash = { text: spec.label + " was removed.", kind: "ok" }; render(); } else say(out, r.error, "err"); }
     });
-    if (ui.editing === p.name) { const f = formFor(p, { isNew: false, onCancel: () => { ui.editing = null; render(); } }); f.style.marginTop = "12px"; card.appendChild(f); }
+    // The settings form is always shown, open, rather than behind an Edit toggle.
+    const f = formFor(p, { isNew: false, onCancel: null }); f.style.marginTop = "12px"; card.appendChild(f);
     return card;
   }
 

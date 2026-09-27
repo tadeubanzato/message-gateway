@@ -15,7 +15,6 @@ services:
 
     environment:
       GATEWAY_BASE_URL: http://localhost:${MG_PORT:-8010}
-      PUBLIC_MCP_URL: http://localhost:${MG_PORT:-8010}/mcp
 
     ports:
       # Bound to localhost on purpose: the first-run setup page has no login.

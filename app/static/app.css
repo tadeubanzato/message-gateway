@@ -74,11 +74,19 @@ input:focus, select:focus { outline:2px solid var(--link); outline-offset:1px; }
 .badge.needs_attention, .badge.queued { color:var(--warn); background:var(--warnbg); }
 .badge.failed { color:var(--err); background:var(--errbg); }
 .badge.not_set_up { color:var(--muted); background:var(--bg); border:1px solid var(--line); }
+.badge.disabled { color:var(--err); background:var(--errbg); }
+/* a badge that's also a button (the Enabled/Disabled pill): looks identical, just clickable */
+/* `font:inherit` here would beat .badge's own font-size/font-weight (higher
+   specificity: element+class), so reset only what a <button> needs and leave
+   size/weight to .badge - this is what made the pill look different before. */
+button.badge { border:0; cursor:pointer; font-family:inherit; line-height:inherit; margin:0; -webkit-appearance:none; appearance:none; }
+button.badge:disabled { opacity:.6; cursor:default; }
 .msg { margin-top:12px; padding:10px 12px; border-radius:10px; font-size:13px; }
 .msg.err { background:var(--errbg); color:var(--err); }
 .msg.ok { background:var(--okbg); color:var(--ok); }
 .empty { text-align:center; padding:28px 12px; color:var(--muted); }
 .hidden { display:none !important; }
+.invisible { visibility:hidden !important; }
 
 table { width:100%; border-collapse:collapse; font-size:13px; }
 th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
@@ -113,7 +121,6 @@ dialog::backdrop { background:rgba(0,0,0,.45); }
 @media (max-width:720px) { .dd .menu { position:static; box-shadow:none; border:0; padding:0 0 0 12px; } }
 
 /* badges and actions */
-.badge.default { color:var(--link); background:transparent; border:1px solid var(--link); }
 .badge.connected { color:var(--ok); background:var(--okbg); }
 .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
 .pcard { border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin:12px 0; background:var(--surface); }
@@ -125,3 +132,19 @@ dialog::backdrop { background:rgba(0,0,0,.45); }
 
 /* the tail of a saved credential, for comparing with the provider's dashboard */
 .tail { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; margin-left:8px; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px; letter-spacing:.3px; }
+
+/* click-to-edit text (app key names): plain text until clicked, no visible field or Save button */
+.editable { cursor:text; border-bottom:1px dashed transparent; padding-bottom:1px; }
+.editable:hover, .editable:focus { border-bottom-color:var(--muted); outline:none; }
+.editable-input { font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--link); border-radius:6px; padding:3px 7px; max-width:180px; }
+.editable-err { color:var(--err); font-size:12px; margin-top:4px; }
+
+/* per-channel identity, fixed per this gateway's own product convention (not the
+   generic categorical order): push = blue, sms = yellow, email = green. */
+:root { --series-push:#2a78d6; --series-sms:#eda100; --series-email:#1baf7a; }
+@media (prefers-color-scheme: dark) {
+  :root { --series-push:#3987e5; --series-sms:#b8791a; --series-email:#0c9a83; }
+}
+
+/* "Messages by channel" trend chart (home) is drawn by Chart.js (vendored in
+   /static/vendor) onto a <canvas>; no bespoke chart CSS needed here. */

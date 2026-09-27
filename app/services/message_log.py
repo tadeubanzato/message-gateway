@@ -12,7 +12,7 @@ not the content. Logging failures never block delivery.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.db import get_repository
@@ -40,6 +40,7 @@ def record_queued(msg: Any, account_id: Optional[str] = None, template: Optional
             "queued_at": msg.created_at or _now_iso(),
             "template": template,
             "app": msg.app,
+            "device": getattr(msg, "device", None),
             "provider": getattr(msg, "provider", None),
             "email_type": msg.emailType,
             "is_test": bool((getattr(msg, "meta", None) or {}).get("test")),
@@ -77,6 +78,31 @@ def record_final(message_id: str, status: str) -> None:
         })
     except Exception:
         pass
+
+
+def channel_trend(account_id: str, days: int = 14, channels: tuple[str, ...] = ("email", "sms", "push")) -> dict[str, Any]:
+    """Per-day, per-channel counts for the last `days` days (UTC), for the home
+    page trend chart. Counts every message queued that day, regardless of how
+    delivery went. Content is never decrypted for this - only channel and date."""
+    today = datetime.now(timezone.utc).date()
+    day_keys = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
+    counts: dict[str, dict[str, int]] = {d: {c: 0 for c in channels} for d in day_keys}
+    try:
+        docs = get_repository().list_messages(None, None, 5000, account_id=account_id)
+    except Exception:
+        docs = []
+    for d in docs:
+        ch = d.get("channel")
+        if ch not in channels:
+            continue
+        day = (d.get("queued_at") or "")[:10]
+        if day in counts:
+            counts[day][ch] += 1
+    return {
+        "days": day_keys,
+        "series": {c: [counts[d][c] for d in day_keys] for c in channels},
+        "totals": {c: sum(counts[d][c] for d in day_keys) for c in channels},
+    }
 
 
 def public_view(doc: dict[str, Any], include_content: bool = True) -> dict[str, Any]:

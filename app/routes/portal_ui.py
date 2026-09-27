@@ -45,15 +45,10 @@ def home(request: Request):
     if redirect:
         return redirect
     assert account is not None
-    docs = get_repository().list_messages(None, None, 100, account_id=str(account["_id"]))
-    counts = {"delivered": 0, "failed": 0, "queued": 0}
-    for d in docs:
-        counts[d.get("status", "queued")] = counts.get(d.get("status", "queued"), 0) + 1
     return templates.TemplateResponse("gateway/home.html", page_ctx(
         request, account, "home",
         channels=channels.all_status(),
-        recent=[message_log.public_view(d, include_content=False) for d in docs[:5]],
-        recent_total=len(docs), counts=counts,
+        trend=message_log.channel_trend(str(account["_id"]), days=14),
     ))
 
 
@@ -139,12 +134,18 @@ def about(request: Request):
         db_ok = get_repository().ping()
     except Exception:
         db_ok = False
-    base_url = str(request.base_url).rstrip("/")
-    return templates.TemplateResponse("gateway/about.html", page_ctx(
+    ctx = page_ctx(
         request, account, "about", version=APP_VERSION, backend=backend_name(), db_ok=db_ok,
         store_content=message_log.store_content_enabled(),
-        mcp_url=(os.environ.get("PUBLIC_MCP_URL") or f"{base_url}/mcp").strip(),
-    ))
+    )
+    ctx["mcp_url"] = f"{ctx['base_url']}/mcp"
+    ctx["mcp_prompt"] = (
+        f"Connect to my self-hosted Message Gateway's MCP server at {ctx['mcp_url']} "
+        f"(X-User-Key: {ctx['user_key']}, X-API-Token: ask me for one, or create one at {ctx['base_url']}/gateway/keys). "
+        "Once connected, use it to send messages, check delivery status, review recent messages, "
+        "and troubleshoot why a message didn't send."
+    )
+    return templates.TemplateResponse("gateway/about.html", ctx)
 
 
 # ---------------------------------------------------------------------
@@ -288,6 +289,24 @@ def channel_remove(request: Request, channel: str, body: ProviderBody):
     return result
 
 
+class ProviderEnabledBody(BaseModel):
+    provider: str
+    enabled: bool
+
+
+@router.post("/gateway/channels/{channel}/provider/enabled", include_in_schema=False)
+def channel_set_provider_enabled(request: Request, channel: str, body: ProviderEnabledBody):
+    """Turn one connected provider on or off. While off, the API and MCP tools
+    refuse to send through it - explicitly requested or picked as the channel's
+    default (see enqueue_message). The provider stays connected and configured."""
+    _known_channel(channel)
+    _owner_or_error(request)
+    if body.provider not in channels.CATALOG[channel]["providers"]:
+        raise HTTPException(status_code=404, detail="Unknown provider.")
+    channels.set_provider_enabled(channel, body.provider, body.enabled)
+    return {"ok": True, "status": channels.channel_status(channel)}
+
+
 class DefaultsBody(BaseModel):
     values: dict[str, str] = Field(default_factory=dict)
 
@@ -344,6 +363,9 @@ def settings_page(request: Request):
         request, account, "settings", backend=backend_name(), db_ok=db_ok, db=db_switch.describe_current(),
         store_content=message_log.store_content_enabled(),
         allow_signups=(secret_store.get_setting(access.SIGNUPS_KEY) or "0") == "1",
+        public_base_url_override=(secret_store.get_setting("PUBLIC_BASE_URL") or "").strip(),
+        public_base_url_env_locked=bool((os.environ.get("PUBLIC_BASE_URL") or "").strip()),
+        detected_base_url=str(request.base_url).rstrip("/"),
     ))
 
 
@@ -390,3 +412,22 @@ def settings_general(request: Request, body: GeneralBody):
     secret_store.set_setting("STORE_MESSAGE_CONTENT", "1" if body.store_content else "0")
     secret_store.set_setting(access.SIGNUPS_KEY, "1" if body.allow_signups else "0")
     return {"ok": True}
+
+
+class PublicBaseUrlBody(BaseModel):
+    url: str = ""
+
+
+@router.post("/gateway/settings/public-url", include_in_schema=False)
+def settings_public_base_url(request: Request, body: PublicBaseUrlBody):
+    _owner_or_error(request)
+    if os.environ.get("PUBLIC_BASE_URL", "").strip():
+        raise HTTPException(status_code=400, detail="PUBLIC_BASE_URL is set in the environment and overrides this - remove it from .env to manage it here.")
+    url = body.url.strip().rstrip("/")
+    if url and not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="Must start with http:// or https://.")
+    if url:
+        secret_store.set_setting("PUBLIC_BASE_URL", url)
+    else:
+        secret_store.delete_setting("PUBLIC_BASE_URL")
+    return {"ok": True, "url": url}

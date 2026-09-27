@@ -5,9 +5,10 @@ from app.services.env import get_env
 from app.services.sms.base import SmsProvider
 
 PROVIDER_REGISTRY = {
+    "custom_http": "app.services.sms.custom_http:CustomHttpProvider",
     "twilio": "app.services.sms.twilio:TwilioProvider",
     "infobip": "app.services.sms.infobip:InfobipProvider",
-    "custom_http": "app.services.sms.custom_http:CustomHttpProvider",
+    "sinch": "app.services.sms.sinch:SinchProvider",
 }
 
 _cache: dict[str, SmsProvider] = {}
@@ -22,8 +23,10 @@ def _load(path: str) -> SmsProvider:
 
 
 def default_provider_name() -> str:
-    """The channel's default provider (what a message uses when it names none)."""
-    return (get_env("SMS_PROVIDER", "twilio") or "twilio").strip().lower() or "twilio"
+    """The channel's default provider (what a message uses when it names none).
+    Must match channels.DEFAULT_PROVIDER["sms"] - that's what the web app shows
+    as the default before anyone picks one."""
+    return (get_env("SMS_PROVIDER", "custom_http") or "custom_http").strip().lower() or "custom_http"
 
 
 def get_sms_provider(name: str | None = None) -> SmsProvider:
