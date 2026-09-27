@@ -138,7 +138,7 @@ class SmsMessage(_ChannelMessage):
     _channel = "sms"
     to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567` (digits only after the `+`), or a list. The API sends it as given and does not guess a country code. Omit to use the default phone number set in the web app.")
     body: str = Field(description="The message text.")
-    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `twilio`, `infobip`, `custom_http` (only the ones connected in the web app work).")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `custom_http`, `twilio`, `infobip`, `sinch` (only the ones connected in the web app work).")
 
 
 class SmsTemplateMessage(_ChannelMessage):
@@ -146,7 +146,7 @@ class SmsTemplateMessage(_ChannelMessage):
     to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567` (digits only after the `+`), or a list. The API sends it as given and does not guess a country code. Omit to use the default phone number set in the web app.")
     template: str = Field(description=_SMS_TEMPLATE_DESC)
     context: dict[str, Any] = Field(default_factory=dict, description=_CONTEXT_DESC)
-    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `twilio`, `infobip`, `custom_http` (only the ones connected in the web app work).")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `custom_http`, `twilio`, `infobip`, `sinch` (only the ones connected in the web app work).")
 
 
 class PushMessage(_ChannelMessage):
