@@ -34,6 +34,14 @@
     <div class="k">AI agents (MCP)</div><div><code>{{ mcp_url }}</code> (same key and token as the API)</div>
   </div>
   <p class="muted" style="margin:10px 0 0">Authenticate with your <code>X-User-Key</code> and <code>X-API-Token</code> headers. See <a href="/gateway/keys">API keys</a>.</p>
+  <p class="muted" style="margin:6px 0 0">The address above is the one you're browsing this page from right now. Reaching the gateway a different way (a domain, a tunnel, your server's IP) shows that instead - if it's ever wrong, for example behind a reverse proxy, {% if is_owner %}set it once in <a href="/gateway/settings">Settings</a>{% else %}ask the administrator to set it in Settings{% endif %}.</p>
+
+  <div style="margin-top:16px">
+    <label style="margin-top:0">Prompt for Claude, Codex, ChatGPT or any MCP-capable agent</label>
+    <p class="help" style="margin:0 0 8px">Paste this in - a coding agent with MCP + shell access (Claude Code, Codex) can connect itself; a chat-only agent will at least know what to ask you for.</p>
+    <pre><code id="mcpPrompt">{{ mcp_prompt }}</code></pre>
+    <button class="btn ghost sm" onclick="copyText(document.getElementById('mcpPrompt').textContent, this)">Copy prompt</button>
+  </div>
 </div>
 
 <div class="card">

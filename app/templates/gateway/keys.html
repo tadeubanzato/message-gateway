@@ -2,7 +2,7 @@
 {% block title %}Message Gateway - API keys{% endblock %}
 {% block content %}
 <h1>API keys</h1>
-<p class="sub">Programs use these to send messages through your gateway.</p>
+<p class="sub">API keys for the apps that connect to this gateway to trigger email, SMS and push messages.</p>
 
 <div class="card">
   <h2>Your user key</h2>
@@ -11,19 +11,20 @@
 </div>
 
 <div class="card">
-  <h2>Keys</h2>
+  {% if error %}<div class="msg err" style="margin:0 0 12px">{{ error }}</div>{% endif %}
+  <h2>App keys</h2>
   {% if active_apps %}
-  <div class="scroll"><table>
-    <thead><tr><th>Name</th><th>Token</th><th>Created</th><th></th></tr></thead>
+  <div class="scroll"><table id="appKeys">
+    <thead><tr><th>App name</th><th>Token</th><th>Created</th><th></th></tr></thead>
     <tbody>
     {% for a in active_apps %}
-      <tr>
-        <td><b>{{ a.app }}</b></td>
+      <tr data-app="{{ a.app }}">
+        <td><span class="editable" data-name tabindex="0" title="Click to rename">{{ a.app }}</span></td>
         <td><code>••••••••{{ a.last4 }}</code></td>
         <td>{{ a.created_at[:10] }}</td>
         <td style="text-align:right;white-space:nowrap">
-          <button class="btn ghost sm" onclick="askRotate('{{ a.app }}')">Replace token</button>
-          <button class="btn danger sm" onclick="askDelete('{{ a.app }}')">Delete</button>
+          <button class="btn ghost sm" onclick="askRotate(this.closest('tr').dataset.app)">Replace token</button>
+          <button class="btn danger sm" onclick="askDelete(this.closest('tr').dataset.app)">Delete</button>
         </td>
       </tr>
     {% endfor %}
@@ -65,5 +66,50 @@
   }
   function askRotate(app) { openDlg(app, "Replace token for '" + app + "'?", "The current token stops working immediately. Anything still using it will start failing until you update it with the new token.", "/gateway/services/message-gateway/tokens", "Replace token"); }
   function askDelete(app) { openDlg(app, "Delete '" + app + "'?", "Its token is revoked immediately. This can't be undone.", "/gateway/services/message-gateway/apps/revoke", "Delete key"); }
+
+  // Click-to-edit app name: no Save button - it saves itself when the field
+  // loses focus or the person presses Enter, and reverts silently if unchanged.
+  var NAME_RE = /^[a-z0-9._-]{2,40}$/;
+  function startRename(span) {
+    var tr = span.closest("tr"), original = tr.dataset.app;
+    var input = document.createElement("input");
+    input.className = "editable-input"; input.value = original; input.maxLength = 40; input.autocomplete = "off";
+    span.replaceWith(input); input.focus(); input.select();
+
+    var errEl = null;
+    function setError(msg) {
+      if (!msg) { if (errEl) { errEl.remove(); errEl = null; } return; }
+      if (!errEl) { errEl = document.createElement("div"); errEl.className = "editable-err"; input.insertAdjacentElement("afterend", errEl); }
+      errEl.textContent = msg;
+    }
+    function toSpan(text) {
+      setError(null);
+      var s = document.createElement("span");
+      s.className = "editable"; s.dataset.name = ""; s.tabIndex = 0; s.title = "Click to rename"; s.textContent = text;
+      input.replaceWith(s);
+    }
+    function commit() {
+      var val = input.value.trim().toLowerCase();
+      if (!val || val === original) { toSpan(original); return; }
+      if (!NAME_RE.test(val)) { setError("2-40 characters: letters, numbers, dot, dash, underscore."); return; }
+      input.disabled = true;
+      window.MG.post("/gateway/services/message-gateway/apps/rename", { app: original, new_app: val })
+        .then(function (r) {
+          if (r.ok) { tr.dataset.app = r.app || val; toSpan(r.app || val); }
+          else { input.disabled = false; setError(r.error || "Could not rename."); input.focus(); }
+        })
+        .catch(function (e) { input.disabled = false; setError(e.message); input.focus(); });
+    }
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+      else if (e.key === "Escape") { e.preventDefault(); toSpan(original); }
+    });
+    input.addEventListener("blur", commit);
+  }
+  var appKeys = document.getElementById("appKeys");
+  if (appKeys) appKeys.addEventListener("click", function (e) {
+    var span = e.target.closest("[data-name]");
+    if (span) startRename(span);
+  });
 </script>
 {% endblock %}

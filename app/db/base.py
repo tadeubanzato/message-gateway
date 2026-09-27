@@ -82,6 +82,15 @@ class Repository(ABC):
         """
         ...
 
+    @abstractmethod
+    def rename_token_app(self, account_id: str, app_filter_fn, new_app: str) -> None:
+        """
+        Rename the currently-active token(s) matched by app_filter_fn (same predicate
+        shape as revoke_tokens) to new_app. The token and its secret are unchanged;
+        only the display name moves.
+        """
+        ...
+
     # ---- portal sessions ----
     @abstractmethod
     def create_session(self, session_doc: dict[str, Any]) -> None:

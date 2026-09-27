@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{% block title %}Message Gateway{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/app.css?v={{ ASSET_V }}" />
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -25,7 +25,6 @@
       </details>
       {% endif %}
       <a href="/gateway/messages" class="{{ 'on' if active == 'messages' }}">Message log</a>
-      <a href="/gateway/keys" class="{{ 'on' if active == 'keys' }}">API keys</a>
       <a href="/gateway/about" class="{{ 'on' if active == 'about' }}">About</a>
     </nav>
     <details class="user">
@@ -33,6 +32,7 @@
       <div class="menu">
         <div class="who"><b>{{ user_name }}</b><div class="muted">{{ user_email }}</div></div>
         <a href="/gateway/account">Account</a>
+        <a href="/gateway/keys" class="{{ 'on' if active == 'keys' }}">API keys</a>
         {% if is_owner %}<a href="/gateway/settings">Settings</a>{% endif %}
         <form method="post" action="/gateway/logout"><button type="submit">Log out</button></form>
       </div>
@@ -73,7 +73,7 @@
     });
   });
 </script>
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ ASSET_V }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

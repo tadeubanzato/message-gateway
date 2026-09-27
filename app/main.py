@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Optional
 
-from fastapi import Body, Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
@@ -20,6 +20,7 @@ from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
 from app.routes.portal_ui import router as portal_ui_router
 from app.services import access, channels, message_log
+from app.services.env import public_base_url
 from app.version import APP_NAME, APP_VERSION
 from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, MessageRequest, MessageResponse
 
@@ -264,8 +265,8 @@ def scalar_docs():
 
 
 @app.get("/get-started", response_class=HTMLResponse, include_in_schema=False)
-def get_started():
-    mcp_url = os.environ.get("PUBLIC_MCP_URL", "http://localhost:8010/mcp").strip()
+def get_started(request: Request):
+    mcp_url = f"{public_base_url(request)}/mcp"
     prompt = (
         f"Connect to the MCP server at {mcp_url} and run through its setup wizard "
         "to configure this message gateway."
@@ -383,8 +384,17 @@ def enqueue_message(req: MessageRequest, account_id: Optional[str]) -> MessageRe
                         "available": connected, "default": channels.default_provider(channel)},
             )
 
+    effective = requested or channels.default_provider(channel)
+    if not channels.provider_enabled(channel, effective):
+        # The administrator switched this specific provider off (Channels > that
+        # channel > that provider's card) - it stays connected, just not allowed to send.
+        provider_label = channels.CATALOG[channel]["providers"][effective]["label"]
+        raise HTTPException(
+            status_code=403,
+            detail={"error": f"{provider_label} is turned off on the gateway.", "channel": channel, "provider": effective},
+        )
+
     if channel == "push" and (req.app or "").strip():
-        effective = requested or channels.default_provider(channel)
         if effective == "pushover":
             names = [a["name"] for a in channels.pushover_apps()]
             if names and req.app.strip().lower() not in names:
@@ -420,6 +430,7 @@ _SEND_RESPONSES = {
     200: {"description": "Queued for delivery. `message_id` identifies the message; with several recipients you get `message_ids` instead."},
     400: {"description": "Invalid request (missing recipient, unknown provider, bad address...)."},
     401: {"description": "Missing or invalid `X-User-Key` / `X-API-Token`."},
+    403: {"description": "The provider that would send this (explicit or the channel's default) is turned off. The administrator switches it back on in the web app (Channels > that channel > that provider)."},
     409: {"description": "No provider is connected for this channel yet. The administrator connects one in the web app."},
 }
 _SEND_DESC = ("Queues the message for delivery. It is validated and logged immediately, then delivered in the "

@@ -19,41 +19,35 @@
 <div class="grid">
   {% for c in channels %}
   <div class="card">
-    <div class="row between"><h2 style="margin:0">{{ c.label }}</h2><span class="badge {{ c.state }}">{{ {'ready':'Ready','needs_attention':'Needs attention','not_set_up':'Not set up'}[c.state] }}</span></div>
+    <div class="row between"><h2 style="margin:0">{{ c.label }}</h2><span class="badge {{ c.state_css }}">{{ c.state_label }}</span></div>
     <p class="muted" style="margin:8px 0 0">
       {% if c.state == 'not_set_up' %}No provider connected yet.
-      {% elif c.state == 'ready' %}Default: <b>{{ c.default_label }}</b>{% if c.connected|length > 1 %}<br />Also connected: {{ c.connected | rejectattr('name', 'equalto', c.default) | map(attribute='label') | join(', ') }}{% endif %}
+      {% elif c.state == 'disabled' %}Every connected provider is turned off. Turn one back on to start sending again.
+      {% elif c.state == 'ready' or c.state == 'ready_degraded' %}Default: <b>{{ c.default_label }}</b>{% if c.connected|length > 1 %}<br />Also connected: {{ c.connected | rejectattr('name', 'equalto', c.default) | map(attribute='label') | join(', ') }}{% endif %}{% if c.state == 'ready_degraded' %}<br />One or more connected providers are turned off.{% endif %}
       {% else %}The default ({{ c.default_label }}) isn't connected. Connected: {{ c.connected | map(attribute='label') | join(', ') }}.{% endif %}
     </p>
     {% if is_owner %}
       <div class="actions">
         {% if c.connected %}
           <button class="btn sm" data-test-channel="{{ c.channel }}" data-test-label="{{ c.label }}" data-default="{{ c.default }}" data-providers='{{ c.connected | tojson }}'>Send test</button>
-          <a class="btn ghost sm" href="/gateway/channels/{{ c.channel }}">{{ 'Fix' if c.state == 'needs_attention' else 'Manage' }}</a>
+          <a class="btn ghost sm" href="/gateway/channels/{{ c.channel }}">{{ 'Manage' if c.state == 'ready' else 'Fix' }}</a>
         {% else %}
           <a class="btn sm" href="/gateway/channels/{{ c.channel }}">Set up</a>
         {% endif %}
       </div>
-    {% elif c.state != 'ready' %}<p class="muted" style="margin:10px 0 0">The administrator of this gateway sets this up.</p>{% endif %}
+    {% elif c.state not in ('ready', 'ready_degraded') %}<p class="muted" style="margin:10px 0 0">The administrator of this gateway sets this up.</p>{% endif %}
   </div>
   {% endfor %}
 </div>
 
 <div class="card">
-  <div class="row between"><h2 style="margin:0">Recent messages</h2><a href="/gateway/messages">View all</a></div>
-  {% if recent %}
-    <div class="scroll"><table style="margin-top:8px">
-      <thead><tr><th>Time (UTC)</th><th>Channel</th><th>To</th><th>Status</th></tr></thead>
-      <tbody>
-      {% for m in recent %}
-        <tr>
-          <td>{{ (m.queued_at or '')[:19].replace('T',' ') }}</td><td>{{ m.channel }}{% if m.is_test %}<span class="badge test">Test</span>{% endif %}</td><td>{{ m.to or '-' }}</td>
-          <td><a href="/gateway/messages/{{ m.message_id }}" style="text-decoration:none"><span class="badge {{ m.status }}">{{ m.status }}</span></a></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table></div>
-    <p class="muted" style="margin:10px 0 0">Of your last {{ recent_total }}: {{ counts.delivered }} delivered, {{ counts.failed }} failed, {{ counts.queued }} waiting.</p>
+  <div class="row between"><h2 style="margin:0">Messages by channel</h2><a href="/gateway/messages">View all</a></div>
+  <p class="muted" style="margin:4px 0 14px">Last 14 days, by when each message was sent.</p>
+  {% if trend.totals.email or trend.totals.sms or trend.totals.push %}
+    <div style="position:relative; height:300px">
+      <canvas id="trendChart"></canvas>
+    </div>
+    <script id="trendData" type="application/json">{{ trend | tojson }}</script>
   {% else %}
     <div class="empty">No messages yet. Send your first one with the example below.</div>
   {% endif %}
@@ -70,4 +64,81 @@
   <button class="btn ghost sm" onclick="copyText(document.getElementById('snippet').textContent, this)">Copy</button>
   <span class="muted" style="margin-left:8px">Email needs <code>to</code> and <code>subject</code>; SMS needs <code>to</code>.</span>
 </div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/vendor/chart.umd.min.js?v={{ ASSET_V }}"></script>
+<script>
+(function () {
+  var dataEl = document.getElementById("trendData");
+  var canvas = document.getElementById("trendChart");
+  if (!dataEl || !canvas || typeof Chart === "undefined") return;
+  var D = JSON.parse(dataEl.textContent);
+  var CHANNELS = [{ key: "email", label: "Email" }, { key: "sms", label: "SMS" }, { key: "push", label: "Push" }];
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  function dayLabel(iso) { var p = iso.split("-"); return MONTHS[parseInt(p[1], 10) - 1] + " " + parseInt(p[2], 10); }
+  var labels = D.days.map(dayLabel);
+
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function withAlpha(hex, a) {
+    var h = hex.replace("#", "");
+    if (h.length === 3) h = h.replace(/./g, "$&$&");
+    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+  }
+
+  var chart = null;
+  function build() {
+    if (chart) chart.destroy();
+    var muted = cssVar("--muted"), gridLine = cssVar("--line"), surface = cssVar("--surface"), fg = cssVar("--fg");
+    chart = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: CHANNELS.map(function (c) {
+          var color = cssVar("--series-" + c.key);
+          return {
+            label: c.label,
+            data: D.series[c.key],
+            borderColor: color,
+            backgroundColor: withAlpha(color, 0.3),
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2.5,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            pointHitRadius: 12,
+            pointHoverBackgroundColor: color,
+            pointHoverBorderColor: surface,
+            pointHoverBorderWidth: 2,
+          };
+        }),
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: muted, font: { size: 11 }, maxRotation: 0 } },
+          y: { beginAtZero: true, grid: { color: gridLine }, ticks: { color: muted, font: { size: 11 }, precision: 0 } },
+        },
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { color: fg, boxWidth: 24, boxHeight: 3, padding: 16, font: { size: 12 } },
+          },
+          tooltip: {
+            backgroundColor: surface, titleColor: fg, bodyColor: fg,
+            borderColor: gridLine, borderWidth: 1, cornerRadius: 8, padding: 10,
+            displayColors: true, boxPadding: 4, titleFont: { weight: "600" }, bodyFont: { size: 12 },
+          },
+        },
+      },
+    });
+  }
+  build();
+
+  // Canvas colors are baked in at draw time (unlike CSS/SVG), so redraw on theme change.
+  if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", build);
+})();
+</script>
 {% endblock %}

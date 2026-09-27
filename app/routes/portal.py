@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_303_SEE_OTHER
 from starlette.templating import Jinja2Templates
@@ -26,6 +27,7 @@ from app import bootstrap
 from app.db import get_repository
 from app.db.base import DuplicateEmailError, DuplicateUserKeyError
 from app.services import access, message_log
+from app.services.env import public_base_url
 from app.services.auth_passwords import hash_password, verify_password
 from app.services.auth_tokens import generate_raw_token, hmac_token_hash_hex, new_user_key, token_last4
 
@@ -33,6 +35,11 @@ router = APIRouter()
 
 TEMPLATES_DIR = os.environ.get("TEMPLATES_DIR", "/app/app/templates").strip() or "/app/app/templates"
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+# Cache-busting query string for /static assets (app.css, app.js, vendored libs):
+# set once per process start, so a rebuilt/restarted container always forces
+# browsers to fetch fresh files instead of silently reusing a stale cached copy
+# (heuristic HTTP caching otherwise means a plain reload can serve last week's CSS).
+templates.env.globals["ASSET_V"] = str(int(time.time()))
 
 SESSION_COOKIE_NAME = (os.environ.get("PORTAL_SESSION_COOKIE", "portal_sid") or "portal_sid").strip()
 SESSION_TTL_HOURS = int((os.environ.get("PORTAL_SESSION_TTL_HOURS", "24") or "24").strip())
@@ -51,7 +58,7 @@ def page_ctx(request: Request, account: dict[str, Any], active: str = "", **extr
         "request": request, "active": active,
         "user_name": account.get("name", ""), "user_email": account.get("email", ""),
         "user_key": account.get("user_key", ""), "is_owner": access.is_owner(account),
-        "base_url": str(request.base_url).rstrip("/"),
+        "base_url": public_base_url(request),
         "warn_not_persistent": not bootstrap.data_is_persistent(),
         **extra,
     }
@@ -369,3 +376,25 @@ async def revoke_application(request: Request):
     _repo().revoke_tokens(account_id, lambda t: _normalize_app(t.get("app") or DEFAULT_TOKEN_APP) == app)
 
     return _redirect("/gateway/keys")
+
+
+@router.post("/gateway/services/message-gateway/apps/rename", include_in_schema=False)
+async def rename_application(request: Request):
+    """Rename a key's app label in place (JSON API, for the inline click-to-edit
+    field on the keys page). The token/secret is untouched."""
+    account = _load_account_from_session(request)
+    if not account:
+        raise HTTPException(status_code=401, detail={"error": "Please log in again."})
+
+    body = await request.json()
+    app = _normalize_app(body.get("app"))
+    new_app = _normalize_app(body.get("new_app"))
+    account_id = str(account["_id"])
+
+    if new_app == app:
+        return {"ok": True, "app": app}  # nothing changed once normalized
+    if new_app in _get_active_apps(account):
+        return {"ok": False, "error": f"'{new_app}' is already in use by another key."}
+
+    _repo().rename_token_app(account_id, lambda t: _normalize_app(t.get("app") or DEFAULT_TOKEN_APP) == app, new_app)
+    return {"ok": True, "app": new_app}

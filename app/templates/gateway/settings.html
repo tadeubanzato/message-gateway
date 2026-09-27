@@ -19,6 +19,25 @@
 </div>
 
 <div class="card">
+  <h2>Public address</h2>
+  <p class="muted" style="margin-top:0">
+    Shown to developers and AI agents on the <a href="/gateway/about">About</a> page (the API examples and the MCP
+    endpoint). By default it's just the address you're browsing this page from right now - that's already right for
+    most setups (localhost, a server's bare IP, a domain pointed straight at the container). Set this only if that's
+    wrong, typically behind a reverse proxy or tunnel (nginx, Cloudflare Tunnel, ngrok) that doesn't forward the
+    original address, so the gateway only ever sees its own internal one.
+  </p>
+  {% if public_base_url_env_locked %}
+    <div class="msg" style="background:var(--warnbg);color:var(--warn)">Set by the <code>PUBLIC_BASE_URL</code> environment variable, so it can't be changed here. Remove it from your <code>.env</code> file and recreate the container to manage it on this page.</div>
+  {% else %}
+    <p class="help" style="margin:0 0 6px">Detected right now: <code>{{ detected_base_url }}</code></p>
+    <input id="publicBaseUrl" value="{{ public_base_url_override }}" placeholder="https://gateway.example.com (blank = auto-detect)" autocomplete="off" style="max-width:420px" />
+    <div class="row" style="margin-top:10px"><button class="btn" id="savePublicUrl">Save</button></div>
+    <div id="uout"></div>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Import from an existing .env file</h2>
   <p class="muted" style="margin-top:0">Moving from an older install? Choose or paste its <code>.env</code> file and the gateway saves the email, SMS and push settings it finds, encrypted. Your old SMS modem settings become a custom SMS endpoint. Nothing leaves this gateway, and only setting <em>names</em> are shown afterwards.</p>
   <input type="file" id="envfile" accept=".env,text/plain" style="max-width:340px" />
@@ -73,6 +92,15 @@
     var b = ev.target, out = document.getElementById("gout"); b.disabled = true;
     window.MG.post("/gateway/settings/general", { store_content: document.getElementById("storeContent").checked, allow_signups: document.getElementById("allowSignups").checked })
       .then(function () { window.MG.say(out, "Saved.", "ok"); })
+      .catch(function (e) { window.MG.say(out, e.message, "err"); })
+      .then(function () { b.disabled = false; });
+  };
+
+  var savePublicUrl = document.getElementById("savePublicUrl");
+  if (savePublicUrl) savePublicUrl.onclick = function (ev) {
+    var b = ev.target, out = document.getElementById("uout"); b.disabled = true;
+    window.MG.post("/gateway/settings/public-url", { url: document.getElementById("publicBaseUrl").value.trim() })
+      .then(function () { window.MG.say(out, "Saved. The About page now shows this address.", "ok"); })
       .catch(function (e) { window.MG.say(out, e.message, "err"); })
       .then(function () { b.disabled = false; });
   };

@@ -8,12 +8,11 @@
 <div class="card">
   <div class="kv">
     <div class="k">Channel</div><div>{{ m.channel }}</div>
-    <div class="k">To</div><div>{{ m.to or '-' }}</div>
+    <div class="k">To</div><div>{% if m.channel == 'push' %}{{ m.app or 'default app' }}{% if m.device %} / {{ m.device }}{% endif %}{% else %}{{ m.to or '-' }}{% endif %}</div>
     <div class="k">Queued</div><div>{{ (m.queued_at or '')[:19].replace('T',' ') }} UTC</div>
     {% if m.delivered_at %}<div class="k">Delivered</div><div>{{ m.delivered_at[:19].replace('T',' ') }} UTC</div>{% endif %}
     {% if m.failed_at %}<div class="k">Failed</div><div>{{ m.failed_at[:19].replace('T',' ') }} UTC</div>{% endif %}
     {% if m.provider %}<div class="k">Provider</div><div>{{ m.provider }}</div>{% endif %}
-    {% if m.app %}<div class="k">App</div><div>{{ m.app }}</div>{% endif %}
     {% if m.template %}<div class="k">Template</div><div>{{ m.template }}</div>{% endif %}
   </div>
 </div>

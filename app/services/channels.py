@@ -18,8 +18,20 @@ from app.services.env import get_env
 from app.services.push import get_push_provider
 from app.services.sms import get_sms_provider
 
-DEFAULT_PROVIDER = {"email": "mailjet", "sms": "twilio", "push": "pushover"}
+DEFAULT_PROVIDER = {"email": "mailjet", "sms": "custom_http", "push": "pushover"}
 CHANNEL_LABELS = {"email": "Email", "sms": "SMS", "push": "Push notifications"}
+
+# Display text and badge color for each channel_status() state - defined once
+# here so home.html, channel.html and anything else showing a channel's status
+# can't drift out of sync with each other.
+STATE_LABEL = {
+    "not_set_up": "Not set up", "needs_attention": "Needs attention",
+    "ready": "Ready", "ready_degraded": "Ready", "disabled": "Disabled",
+}
+STATE_CSS = {
+    "not_set_up": "not_set_up", "needs_attention": "needs_attention",
+    "ready": "ready", "ready_degraded": "needs_attention", "disabled": "disabled",
+}
 
 # Provider catalog: what the UI asks for. `secret` fields are masked in the UI.
 # `extra` values are stored alongside (fixed wiring the user shouldn't have to know).
@@ -57,36 +69,15 @@ CATALOG: dict[str, dict[str, Any]] = {
         "selector": "SMS_PROVIDER",
         "getter": get_sms_provider,
         "providers": {
-            "twilio": {
-                "label": "Twilio",
-                "blurb": 'Text messages to most countries. Needs a Twilio phone number.',
-                "links": [{"label": "Sign in to Twilio", "url": "https://www.twilio.com/login"}, {"label": "Open the Twilio console", "url": "https://console.twilio.com/"}],
-                "help": "Console home shows the Account SID and Auth Token (twilio.com/console).",
-                "fields": [
-                    {"name": "TWILIO_ACCOUNT_SID", "label": "Account SID"},
-                    {"name": "TWILIO_AUTH_TOKEN", "label": "Auth token", "secret": True},
-                    {"name": "TWILIO_FROM_NUMBER", "label": "From number (e.g. +15551234567)"},
-                ],
-            },
-            "infobip": {
-                "label": "Infobip",
-                "blurb": 'Global SMS and messaging platform.',
-                "links": [{"label": "Sign in to Infobip", "url": "https://portal.infobip.com/login"}, {"label": "Open your API keys", "url": "https://portal.infobip.com/dev/api-keys"}],
-                "help": "API key and base URL are in your Infobip portal under Developers.",
-                "fields": [
-                    {"name": "INFOBIP_API_KEY", "label": "API key", "secret": True},
-                    {"name": "INFOBIP_BASE_URL", "label": "Base URL (e.g. xxxxx.api.infobip.com)"},
-                    {"name": "INFOBIP_FROM", "label": "Sender ID"},
-                ],
-            },
             "custom_http": {
-                "label": "Custom HTTP endpoint (your own SMS service)",
-                "blurb": 'Use your own SMS service or modem. You set the URL and the JSON it expects.',
+                "label": "Custom API endpoint",
+                "blurb": 'Setup your own SMS service',
                 "help": (
                     "Send through your own SMS service, such as an SMS box or modem API on your network. "
                     "Give the endpoint address and a sample JSON body; the gateway sends every message in that "
                     "pattern, replacing {{to}}, {{message}}, {{message_id}} and {{to_digits}} (the number without the +)."
                 ),
+                "curl_paste": True,
                 "fields": [
                     {"name": "CUSTOM_SMS_URL", "label": "Endpoint URL", "placeholder": "https://sms.example.com/api/send"},
                     {"name": "CUSTOM_SMS_METHOD", "label": "HTTP method", "type": "select",
@@ -104,6 +95,45 @@ CATALOG: dict[str, dict[str, Any]] = {
                     "CUSTOM_SMS_BODY": '{\n  "number": "{{to}}",\n  "message": "{{message}}",\n  "message_id": "{{message_id}}"\n}',
                     "CUSTOM_SMS_SUCCESS_TEXT": '"status": "ok"',
                 },
+            },
+            "twilio": {
+                "label": "Twilio",
+                "blurb": 'Text messages to most countries. Needs a Twilio phone number.',
+                "links": [{"label": "Sign in to Twilio", "url": "https://www.twilio.com/login"}, {"label": "Open the Twilio console", "url": "https://console.twilio.com/"}],
+                "help": "Console home shows the Account SID and Auth Token (twilio.com/console). The from number must be a phone number you've bought or verified in that account.",
+                "fields": [
+                    {"name": "TWILIO_ACCOUNT_SID", "label": "Account SID", "placeholder": "AC..."},
+                    {"name": "TWILIO_AUTH_TOKEN", "label": "Auth token", "secret": True},
+                    {"name": "TWILIO_FROM_NUMBER", "label": "From number (e.g. +15551234567)"},
+                ],
+            },
+            "infobip": {
+                "label": "Infobip",
+                "blurb": 'Global SMS and messaging platform.',
+                "links": [{"label": "Sign in to Infobip", "url": "https://portal.infobip.com/login"}, {"label": "Open your API keys", "url": "https://portal.infobip.com/dev/api-keys"}],
+                "help": "API key and base URL are in your Infobip portal under Developers - the base URL is account-specific (looks like xxxxx.api.infobip.com), not the shared api.infobip.com address.",
+                "fields": [
+                    {"name": "INFOBIP_API_KEY", "label": "API key", "secret": True},
+                    {"name": "INFOBIP_BASE_URL", "label": "Base URL (e.g. xxxxx.api.infobip.com)", "placeholder": "https://xxxxx.api.infobip.com"},
+                    {"name": "INFOBIP_FROM", "label": "Sender ID or number", "placeholder": "YourBrand"},
+                ],
+            },
+            "sinch": {
+                "label": "Sinch",
+                "blurb": 'Global SMS API. Needs a Sinch SMS service plan and API token.',
+                "links": [{"label": "Sign in to Sinch", "url": "https://dashboard.sinch.com/"}, {"label": "Open SMS API services", "url": "https://dashboard.sinch.com/sms/api/services"}],
+                "help": (
+                    "Create (or open) an SMS API service under SMS > APIs in the Sinch dashboard for the Service "
+                    "Plan ID and an API token. Pick the region the service plan was created in - a mismatch here "
+                    "is the most common reason a working token gets rejected."
+                ),
+                "fields": [
+                    {"name": "SINCH_SERVICE_PLAN_ID", "label": "Service Plan ID"},
+                    {"name": "SINCH_API_TOKEN", "label": "API token", "secret": True},
+                    {"name": "SINCH_REGION", "label": "Region", "type": "select",
+                     "options": ["us", "eu", "au", "br", "ca"], "default": "us", "optional": True},
+                    {"name": "SINCH_FROM_NUMBER", "label": "From number or sender ID", "placeholder": "+15551234567"},
+                ],
             },
         },
     },
@@ -333,11 +363,24 @@ def connected_providers(channel: str) -> list[str]:
     return [name for name in CATALOG[channel]["providers"] if provider_connected(channel, name)]
 
 
+def provider_enabled(channel: str, provider: str) -> bool:
+    """Whether this specific connected provider is allowed to send. On by default;
+    turning it off blocks a send that would use it, whether picked explicitly or
+    as the channel's default (see enqueue_message) - the provider stays connected
+    and configured, it's just not allowed to send."""
+    return (get_env(f"PROVIDER_ENABLED_{channel.upper()}_{provider.upper()}", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def set_provider_enabled(channel: str, provider: str, enabled: bool) -> None:
+    secret_store.set_setting(f"PROVIDER_ENABLED_{channel.upper()}_{provider.upper()}", "1" if enabled else "0")
+
+
 def provider_status(channel: str, provider: str) -> dict[str, Any]:
     info = CATALOG[channel]["providers"][provider]
     out = {
         "name": provider, "label": info["label"], "connected": provider_connected(channel, provider),
         "is_default": provider == default_provider(channel),
+        "enabled": provider_enabled(channel, provider),
         "fields": [
             {"name": f["name"], "set": is_field_set(f["name"]),
              "value": None if f.get("secret") else (get_env(f["name"]) or ""),
@@ -353,20 +396,31 @@ def provider_status(channel: str, provider: str) -> dict[str, Any]:
 
 def channel_status(channel: str) -> dict[str, Any]:
     """Cheap, offline status (no network call).
-    state: ready (default provider connected) | needs_attention (some provider
-    connected but not the default) | not_set_up (none connected)."""
+    state: not_set_up (nothing connected) | needs_attention (something connected
+    but not the default) | ready (default connected, every connected provider
+    enabled) | ready_degraded (default connected, some connected providers
+    turned off - same green/ready meaning, shown in amber) | disabled (default
+    connected, every connected provider turned off)."""
     spec = CATALOG[channel]
     default = default_provider(channel)
     connected = connected_providers(channel)
-    if default in connected:
-        state = "ready"
-    elif connected:
-        state = "needs_attention"
+    if default not in connected:
+        state = "needs_attention" if connected else "not_set_up"
     else:
-        state = "not_set_up"
+        enabled_count = sum(1 for n in connected if provider_enabled(channel, n))
+        if enabled_count == len(connected):
+            state = "ready"
+        elif enabled_count == 0:
+            state = "disabled"
+        else:
+            state = "ready_degraded"
     default_info = spec["providers"].get(default)
     return {
         "channel": channel, "label": CHANNEL_LABELS[channel], "state": state,
+        # Text and badge color computed once here, not duplicated per template -
+        # "ready_degraded" reads as "Ready" (it still sends) but colors like
+        # "needs_attention" (amber), so it's visibly not the full-green state.
+        "state_label": STATE_LABEL[state], "state_css": STATE_CSS[state],
         "default": default, "default_label": default_info["label"] if default_info else default,
         "connected": [{"name": n, "label": spec["providers"][n]["label"]} for n in connected],
         "providers": [provider_status(channel, n) for n in spec["providers"]],

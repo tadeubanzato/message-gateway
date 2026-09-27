@@ -128,6 +128,25 @@ class AtlasRepository(Repository):
             array_filters=[{"t.token_id": {"$in": token_ids_to_revoke}}],
         )
 
+    def rename_token_app(self, account_id: str, app_filter_fn, new_app: str) -> None:
+        acct = self.find_account_by_id(account_id)
+        if not acct:
+            return
+        svc = (acct.get("services") or {}).get("message-gateway") or {}
+        tokens = svc.get("tokens") or []
+        token_ids_to_rename = [
+            t.get("token_id")
+            for t in tokens
+            if isinstance(t, dict) and t.get("revoked_at") is None and app_filter_fn(t)
+        ]
+        if not token_ids_to_rename:
+            return
+        self._db.accounts.update_one(
+            {"_id": _to_object_id(account_id)},
+            {"$set": {"services.message-gateway.tokens.$[t].app": new_app}},
+            array_filters=[{"t.token_id": {"$in": token_ids_to_rename}}],
+        )
+
     # ---- portal sessions ----
     def create_session(self, session_doc: dict[str, Any]) -> None:
         self._db.portal_sessions.insert_one(session_doc)
