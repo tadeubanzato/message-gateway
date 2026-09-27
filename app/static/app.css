@@ -4,13 +4,14 @@
   --bg:#f6f7f9; --surface:#fff; --fg:#14171a; --muted:#66707a; --line:#e3e6ea;
   --accent:#111827; --accent-fg:#fff; --link:#1d4ed8;
   --ok:#0a7a3d; --okbg:#e8f6ee; --warn:#8a6100; --warnbg:#fff6df; --err:#a40000; --errbg:#fdecec;
-  --radius:12px; --shadow:0 1px 2px rgba(0,0,0,.05);
+  --radius:12px; --shadow:0 1px 2px rgba(0,0,0,.05); --hover:#eef0f3;
 }
 @media (prefers-color-scheme: dark) {
+  /* Matches the Scalar API reference (/scalar): slate background, teal accent. */
   :root {
-    --bg:#0d0f12; --surface:#16191d; --fg:#e8eaed; --muted:#98a1ab; --line:#2a2f36;
-    --accent:#e8eaed; --accent-fg:#111; --link:#8ab4ff;
-    --ok:#4cc38a; --okbg:#10261b; --warn:#f2c14e; --warnbg:#2a2210; --err:#ff8a8a; --errbg:#2b1414;
+    --bg:#1f2128; --surface:#24262e; --hover:#282a34; --fg:#e9e9ea; --muted:#aaabad; --line:#36383e;
+    --accent:#e9e9ea; --accent-fg:#1f2128; --link:#5cc9b8;
+    --ok:#5cc9b8; --okbg:#243a3d; --warn:#ffc90d; --warnbg:#38341f; --err:#ff7b78; --errbg:#3b2429;
     --shadow:none;
   }
 }
@@ -31,14 +32,14 @@ code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; 
 .brand { font-weight:700; color:var(--fg); text-decoration:none; letter-spacing:-.2px; white-space:nowrap; }
 .links { display:flex; gap:4px; flex:1; }
 .links a { color:var(--muted); text-decoration:none; padding:7px 11px; border-radius:8px; font-size:14px; }
-.links a:hover { background:var(--bg); color:var(--fg); }
-.links a.on { color:var(--fg); background:var(--bg); font-weight:600; }
+.links a:hover { background:var(--hover); color:var(--fg); }
+.links a.on { color:var(--fg); background:var(--hover); font-weight:600; }
 .user { position:relative; }
 .user summary { list-style:none; cursor:pointer; padding:6px 10px; border-radius:8px; font-size:14px; border:1px solid var(--line); }
 .user summary::-webkit-details-marker { display:none; }
 .menu { position:absolute; right:0; top:42px; min-width:190px; background:var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.12); padding:6px; }
 .menu a, .menu button { display:block; width:100%; text-align:left; padding:8px 10px; border-radius:8px; color:var(--fg); text-decoration:none; background:none; border:0; font:inherit; cursor:pointer; }
-.menu a:hover, .menu button:hover { background:var(--bg); }
+.menu a:hover, .menu button:hover { background:var(--hover); }
 .menu .who { padding:8px 10px; border-bottom:1px solid var(--line); margin-bottom:4px; }
 .burger { display:none; background:none; border:1px solid var(--line); border-radius:8px; padding:6px 10px; color:var(--fg); font-size:16px; cursor:pointer; }
 @media (max-width:720px) {
