@@ -88,7 +88,7 @@ CATALOG: dict[str, dict[str, Any]] = {
                      "secret": True, "optional": True, "placeholder": "Authorization: Bearer YOUR_TOKEN"},
                     {"name": "CUSTOM_SMS_BODY", "label": "Request body (JSON sample)", "type": "textarea", "preview": True,
                      "placeholder": '{"number": "{{to}}", "message": "{{message}}"}'},
-                    {"name": "CUSTOM_SMS_SUCCESS_TEXT", "label": "Count as delivered only if the response contains (optional)",
+                    {"name": "CUSTOM_SMS_SUCCESS_TEXT", "label": "Count as delivered only if the response contains",
                      "optional": True, "placeholder": '"status": "ok"'},
                 ],
                 "example": {
