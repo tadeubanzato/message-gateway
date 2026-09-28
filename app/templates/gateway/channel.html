@@ -63,9 +63,9 @@
       const norm = k.toLowerCase().replace(/[-\s]/g, "_");
       const v = value[k];
       if (v && typeof v === "object") { out[k] = curlMapBody(v, mapped); continue; }
-      if (CURL_PHONE_KEYS.includes(norm)) { out[k] = "{{to}}"; mapped.push(k); }
-      else if (CURL_MESSAGE_KEYS.includes(norm)) { out[k] = "{{message}}"; mapped.push(k); }
-      else if (CURL_MSGID_KEYS.includes(norm)) { out[k] = "{{message_id}}"; mapped.push(k); }
+      if (CURL_PHONE_KEYS.includes(norm)) { out[k] = "{% raw %}{{to}}{% endraw %}"; mapped.push(k); }
+      else if (CURL_MESSAGE_KEYS.includes(norm)) { out[k] = "{% raw %}{{message}}{% endraw %}"; mapped.push(k); }
+      else if (CURL_MSGID_KEYS.includes(norm)) { out[k] = "{% raw %}{{message_id}}{% endraw %}"; mapped.push(k); }
       else out[k] = v;
     }
     return out;
@@ -170,7 +170,7 @@
           setField("CUSTOM_SMS_HEADERS", parsed.headers.join("\n"));
           if (parsed.body !== null) setField("CUSTOM_SMS_BODY", parsed.body);
           if (parsed.mapped) say(out, 'Filled in below. In the body, "' + parsed.mapped.join('", "') + '" ' + (parsed.mapped.length > 1 ? "were" : "was") + " swapped for placeholders - check it before saving.", "ok");
-          else say(out, "Filled in below, but we couldn't tell which part of the body is the phone number, message or message ID - add {{to}}, {{message}} and {{message_id}} yourself.", "err");
+          else say(out, "Filled in below, but we couldn't tell which part of the body is the phone number, message or message ID - add {% raw %}{{to}}, {{message}} and {{message_id}}{% endraw %} yourself.", "err");
         } catch (e) { say(out, "Couldn't read that: " + e.message, "err"); }
       };
     }
