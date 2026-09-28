@@ -54,14 +54,16 @@ This builds the container (the first build takes a few minutes; be patient),
 starts it, waits until it reports healthy, and then tries to open the setup page
 in the default browser. There is nothing to configure first.
 
-- HEADLESS / REMOTE MACHINE (a server, a machine you reached over SSH, or one
-  with no desktop/browser): the user's browser is on ANOTHER computer, so
-  `localhost` is useless to them. Do not stop to ask about it and do not offer an
-  SSH tunnel as the plan. Install with `MG_BIND=0.0.0.0 ./install.sh` right away
-  (add `MG_PORT=...` if the port is busy). Signs of this case: `$SSH_CONNECTION`
-  is set, Linux with no `$DISPLAY` / `$WAYLAND_DISPLAY`, or the user said it is a
-  server. If you are unsure, ask once: "Will you open this from this machine's own
-  browser, or from another computer?"
+- HEADLESS / REMOTE MACHINE (a server, or one reached over SSH): `./install.sh`
+  detects this itself and makes the gateway reachable from the user's network,
+  because their browser is on another computer. Just run `./install.sh`; do not
+  stop to ask, and do not offer an SSH tunnel as the plan. It prints the address
+  to open (an IP and a `<hostname>.local` name), each ending in `#token=...`.
+  Give the user that FULL link including the `#token=...` part (it is the key to
+  the setup page; without it the page refuses). Never tell them `localhost`.
+- `./install.sh` checks itself that the gateway answers on that network address
+  and tries to open a blocked firewall port. If it stops with "does not answer on
+  ...", it did NOT succeed: show the user its message, do not say it works.
 - If the port is busy, run `MG_PORT=9000 ./install.sh` and use that port in the
   steps below instead of 8010.
 - If it fails, show the user the relevant lines it printed, fix the cause (Docker
@@ -84,11 +86,8 @@ in the default browser. There is nothing to configure first.
   If you are running somewhere the user's browser can't be reached (a remote
   machine, container or cloud sandbox), do not try further. Give the user the
   address and ask them to open it. On a headless machine that address is NOT
-  `localhost`: it is the machine's address on the user's network, printed by
-  `./install.sh` as "Other machines on your network". If it printed none, get it
-  with `hostname -I` (first address that is not a Docker/VM bridge such as
-  172.x or 192.168.122.x) and give `http://<that address>:8010`. The machine's
-  `<hostname>.local` name usually works too, but the IP is the reliable one.
+  `localhost`: use the "Finish setup in your browser" link `./install.sh`
+  printed, in full (for example http://192.168.5.48:8010#token=AbC123...).
 
 ## 4. Hand over to the user
 
@@ -154,7 +153,13 @@ done in the web app only, never through MCP.
 
     curl -fsS http://127.0.0.1:8010/health
 
-Expect `"ok":true`, `"db_ok":true` and `"data_persistent":true`. If
+On a headless machine also check the address you are giving the user, from the
+machine itself, and do not say it works until this succeeds:
+
+    curl -fsS http://<the address install.sh printed>/health
+
+If that fails but 127.0.0.1 works, a firewall is blocking the port (Linux:
+`sudo ufw allow 8010/tcp`); tell the user what you found. Expect `"ok":true`, `"db_ok":true` and `"data_persistent":true`. If
 `data_persistent` is false, the data is not on a Docker volume and would be lost
 when the container is removed; tell the user and re-run `./install.sh`. Report the
 result. That is the end of the install.
@@ -165,14 +170,13 @@ result. That is the end of the install.
   never write secrets into any file.
 - Do not create a `.env` file. Values in `.env` override what the user enters in
   the browser, and the pages could not change them.
-- The gateway listens on localhost only by default (the first-run setup page has
-  no login), which is right when the browser is on the same machine. When the
-  user is on another computer (headless/remote install) use
-  `MG_BIND=0.0.0.0 ./install.sh` as described in step 2, and tell the user to
-  create the administrator account straight away, because until then anyone on
-  the network could. Only if they say the network is not trusted, offer an SSH
-  tunnel instead (`ssh -L 8010:localhost:8010 user@host`, then open
-  http://localhost:8010).
+- On a normal desktop the gateway listens on localhost only (the first-run setup
+  page has no login). On a headless/SSH machine `./install.sh` opens it to the
+  network automatically and protects the setup page with a token in the link it
+  prints, so only the person holding that link can create the administrator
+  account. Still tell them to finish setup promptly. To force
+  localhost only: `MG_BIND=127.0.0.1 ./install.sh`; to force network access:
+  `MG_BIND=0.0.0.0 ./install.sh`.
 - Useful commands (run in ~/message-gateway):
     docker compose stop          stop it
     docker compose start         start it again

@@ -5,7 +5,8 @@ That is all the unauthenticated setup does. Providers (email, SMS, push) are
 connected afterwards on the Channels pages, by the logged-in administrator, so
 credentials never pass through an unauthenticated endpoint.
 
-Security model: these endpoints work only while no account exists. Once the
+Security model: these endpoints work only while no account exists (and, when
+install.sh set MG_SETUP_TOKEN, only with that token). Once the
 administrator is created every one of them returns 403. If the database is
 configured as Atlas but unreachable, setup stays locked rather than open, so a
 temporary outage can't be used to repoint the gateway at another database.
@@ -13,10 +14,11 @@ temporary outage can't be used to repoint the gateway at another database.
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -38,9 +40,16 @@ def _is_complete() -> bool:
         return bool(bootstrap.get("mongodb_uri"))  # fail closed when a remote DB is configured
 
 
-def _require_open() -> None:
+def _require_open(request: Request) -> None:
     if _is_complete():
         raise HTTPException(status_code=403, detail="Setup is already complete.")
+    # install.sh sets MG_SETUP_TOKEN and prints a link ending in #token=... : the
+    # setup page then works from any computer on the network, but only for whoever
+    # has that link. Without a token configured (plain `docker compose up`, which
+    # listens on localhost only) setup is open as before.
+    expected = (os.getenv("MG_SETUP_TOKEN") or "").strip()
+    if expected and not hmac.compare_digest(request.headers.get("x-setup-token", ""), expected):
+        raise HTTPException(status_code=401, detail="This setup page needs the link the installer printed (it ends in #token=...).")
 
 
 # ---------------------------------------------------------------------
@@ -62,8 +71,8 @@ def setup_page():
 # JSON API used by the setup page
 # ---------------------------------------------------------------------
 @router.get("/setup/state", include_in_schema=False)
-def setup_state():
-    _require_open()
+def setup_state(request: Request):
+    _require_open(request)
     try:
         db_ok = get_repository().ping()
     except Exception:
@@ -78,8 +87,8 @@ class DatabaseChoice(BaseModel):
 
 
 @router.post("/setup/database", include_in_schema=False)
-def setup_database(body: DatabaseChoice):
-    _require_open()
+def setup_database(body: DatabaseChoice, request: Request):
+    _require_open(request)
     if body.backend == "atlas":
         from app.db.atlas_repository import test_connection
 
@@ -113,8 +122,8 @@ class AdminBody(BaseModel):
 
 
 @router.post("/setup/admin", include_in_schema=False)
-def setup_admin(body: AdminBody):
-    _require_open()
+def setup_admin(body: AdminBody, request: Request):
+    _require_open(request)
     try:
         account, raw_token, sid = create_account(
             body.name, body.email, body.password, body.password2, make_admin=True

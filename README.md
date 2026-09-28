@@ -59,8 +59,10 @@ cd ~/message-gateway
 opens **http://localhost:8010** in your browser. The first build takes a few minutes.
 
 - Another port: `MG_PORT=9000 ./install.sh`
-- Reachable from other machines, not just this one: `MG_BIND=0.0.0.0 ./install.sh` (default is
-  `127.0.0.1`-only - see the security note below before using this)
+- Who can reach it: on a headless Linux server (or over SSH) the installer makes it reachable from
+  your network automatically and prints the address to open. On a desktop it is this machine only.
+  Force either way with `MG_BIND=0.0.0.0 ./install.sh` or `MG_BIND=127.0.0.1 ./install.sh`
+  (see the security note below)
 - Don't open the browser: `MG_NO_OPEN=1 ./install.sh`
 - Windows: run it from WSL or Git Bash, with Docker Desktop running.
 - Update later: `git pull && ./install.sh` (your data is kept).
@@ -357,11 +359,12 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
 
 ## 7. Security notes
 
-- **Localhost only, by default.** The gateway listens on `127.0.0.1` because the first-run setup
-  page has no login - anyone who could reach it before an administrator account exists could
-  create it. To reach it from other machines, run `MG_BIND=0.0.0.0 ./install.sh` (or set
-  `MG_BIND=0.0.0.0` in `.env` and `docker compose up -d`), ideally only after setup is finished
-  or over a trusted network/tunnel, and put it behind HTTPS.
+- **Localhost on a desktop, network-visible on a headless server.** The first-run setup page has
+  no login. On a desktop the gateway therefore listens on `127.0.0.1` only. On a headless server
+  `./install.sh` opens it to your network (your browser is on another computer) and protects the
+  setup page with a one-time token: the installer prints a link ending in `#token=...`, and only
+  someone with that link can create the administrator account. Put it behind HTTPS if it faces
+  anything beyond your own network. Override with `MG_BIND=127.0.0.1` or `MG_BIND=0.0.0.0`.
 - **Administrator vs members.** The first account is the administrator. Sign-ups are off by
   default. Members can send messages but can't change settings. Everything under Channels and
   Settings requires the administrator's login session.

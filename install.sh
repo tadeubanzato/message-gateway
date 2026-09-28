@@ -7,18 +7,48 @@
 # Nothing to configure first: no .env file, no keys. You finish setup in the
 # browser. Options (environment variables):
 #   MG_PORT=9000       use a different port (default 8010)
-#   MG_BIND=0.0.0.0    reachable from other machines, not just this one (default
-#                      127.0.0.1 - see the warning this prints when you set it)
+#   MG_BIND=0.0.0.0    reachable from other machines, not just this one
+#   MG_BIND=127.0.0.1  this machine only
+#                      Default: chosen for you. A machine with no desktop (a Linux
+#                      server, or one you reached over SSH) is set up to be reachable
+#                      from your network, since your browser is on another computer.
+#                      Anything else (your laptop) is this machine only.
 #   MG_NO_OPEN=1       don't open the browser automatically
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 PORT="${MG_PORT:-8010}"
-BIND="${MG_BIND:-127.0.0.1}"
+
+# Is this a machine nobody sits at (server / SSH session)? Then the browser that
+# will open the setup page is on another computer, and localhost is no use to it.
+is_headless() {
+  [ -n "${SSH_CONNECTION:-}" ] && return 0
+  [ "$(uname -s)" = "Linux" ] || return 1
+  grep -qi microsoft /proc/version 2>/dev/null && return 1      # WSL: the Windows browser is local
+  [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]
+}
+
+BIND_AUTO=0
+if [ -n "${MG_BIND:-}" ]; then
+  BIND="$MG_BIND"
+elif is_headless; then
+  BIND="0.0.0.0"; BIND_AUTO=1
+else
+  BIND="127.0.0.1"
+fi
 URL="http://localhost:${PORT}"
 export MG_PORT="$PORT"
 export MG_BIND="$BIND"
+
+# When the gateway is reachable from the network, the first-run setup page needs a
+# one-time link token, so nobody else on the network can claim the administrator
+# account before you do. (Localhost-only installs don't need it.)
+if [ "$BIND" != "127.0.0.1" ] && [ -z "${MG_SETUP_TOKEN:-}" ]; then
+  MG_SETUP_TOKEN="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 24 || true)"
+  [ -n "$MG_SETUP_TOKEN" ] || MG_SETUP_TOKEN="$(date +%s%N | shasum | head -c 24)"
+fi
+export MG_SETUP_TOKEN="${MG_SETUP_TOKEN:-}"
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -58,28 +88,59 @@ if [ "$ok" -ne 1 ]; then
 fi
 
 # ---- 5. done ----------------------------------------------------------------
-say ""
-say "Message Gateway is running."
-say ""
-say "  Finish setup in your browser:  ${URL}"
-say ""
+LAN_IP=""; LAN_URL=""; NAME_URL=""; TOKEN_FRAG=""
+[ -n "${MG_SETUP_TOKEN:-}" ] && TOKEN_FRAG="#token=${MG_SETUP_TOKEN}"
 if [ "$BIND" != "127.0.0.1" ]; then
   # Best guess at this machine's address on the local network (skips Docker/VM bridges).
-  LAN_IP=""
   if command -v hostname >/dev/null 2>&1; then
     LAN_IP="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -Ev '^(172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.122\.|127\.|169\.254\.|$)' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
   fi
   if [ -z "$LAN_IP" ] && command -v ipconfig >/dev/null 2>&1; then
     LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
   fi
-  if [ -n "$LAN_IP" ]; then
-    say "  Other machines on your network:  http://${LAN_IP}:${PORT}"
+  [ -n "$LAN_IP" ] && LAN_URL="http://${LAN_IP}:${PORT}"
+  HOST_NAME="$(hostname -s 2>/dev/null || true)"
+  [ -n "$HOST_NAME" ] && NAME_URL="http://${HOST_NAME}.local:${PORT}"
+
+  # Prove it works from the network side, not just from localhost - and if a
+  # firewall is in the way, open the port when we are allowed to (never prompts).
+  if [ -n "$LAN_URL" ] && ! curl -fsS -m 5 "${LAN_URL}/health" >/dev/null 2>&1; then
+    if command -v ufw >/dev/null 2>&1 && sudo -n ufw status 2>/dev/null | grep -q "Status: active"; then
+      say "A firewall (ufw) is blocking port ${PORT}; opening it..."
+      sudo -n ufw allow "${PORT}/tcp" >/dev/null 2>&1 || true
+    elif command -v firewall-cmd >/dev/null 2>&1 && sudo -n firewall-cmd --state >/dev/null 2>&1; then
+      say "A firewall (firewalld) is blocking port ${PORT}; opening it..."
+      sudo -n firewall-cmd --permanent --add-port="${PORT}/tcp" >/dev/null 2>&1 && sudo -n firewall-cmd --reload >/dev/null 2>&1 || true
+    fi
+    sleep 2
+    if ! curl -fsS -m 5 "${LAN_URL}/health" >/dev/null 2>&1; then
+      fail "The gateway is running, but it does not answer on ${LAN_URL}, so other computers can't reach it. A firewall on this machine is the usual cause. Open the port (Linux:  sudo ufw allow ${PORT}/tcp   or   sudo firewall-cmd --permanent --add-port=${PORT}/tcp && sudo firewall-cmd --reload ), then run ./install.sh again. To use it from this machine only:  MG_BIND=127.0.0.1 ./install.sh"
+    fi
+  fi
+fi
+
+say ""
+say "Message Gateway is running."
+say ""
+if [ -n "$LAN_URL" ]; then
+  say "  Finish setup in your browser (from any computer on your network):"
+  say "      ${LAN_URL}${TOKEN_FRAG}"
+  [ -n "$NAME_URL" ] && say "      ${NAME_URL}${TOKEN_FRAG}   (if your network resolves .local names)"
+  say ""
+  say "  Use the whole link, including the part after the #: it is the key to the setup"
+  say "  page, so only people you give it to can create the administrator account."
+  say "  (Lost it? Run ./install.sh again and it prints a new one.)"
+  say ""
+  [ "$BIND_AUTO" = "1" ] && say "  This machine has no desktop, so it is reachable from your network. To keep it to this"
+  [ "$BIND_AUTO" = "1" ] && say "  machine only:  MG_BIND=127.0.0.1 ./install.sh" && say ""
+else
+  say "  Finish setup in your browser:  ${URL}"
+  say ""
+  if [ "$BIND" != "127.0.0.1" ]; then
+    say "  Could not work out this machine's network address. Open it with this machine's IP"
+    say "  address and port ${PORT}, followed by ${TOKEN_FRAG}"
     say ""
   fi
-  say "  Reachable from other machines too (MG_BIND=${BIND}). The setup page has no"
-  say "  login until you create the administrator account below - finish that first"
-  say "  if this machine is reachable by anyone you don't trust yet."
-  say ""
 fi
 say "  Two quick steps: choose where to store data, then create the administrator"
 say "  account. After that, connect your email / SMS / push / Telegram / WhatsApp"
@@ -107,10 +168,11 @@ open_url() {
   esac
 }
 
+OPEN_ADDR="${LAN_URL:-$URL}${TOKEN_FRAG}"
 if [ "${MG_NO_OPEN:-0}" = "1" ]; then
-  say "Browser not opened (MG_NO_OPEN=1). Open this address yourself: ${URL}"
-elif open_url "$URL"; then
+  say "Browser not opened (MG_NO_OPEN=1). Open this address yourself: ${OPEN_ADDR}"
+elif open_url "${URL}${TOKEN_FRAG}"; then
   say "Opened the setup page in your default browser: ${URL}"
 else
-  say "Could not open a browser automatically. Open this address yourself: ${URL}"
+  say "Could not open a browser automatically. Open this address yourself: ${OPEN_ADDR}"
 fi
