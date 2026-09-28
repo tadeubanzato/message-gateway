@@ -58,8 +58,12 @@ in the default browser. There is nothing to configure first.
   detects this itself and makes the gateway reachable from the user's network,
   because their browser is on another computer. Just run `./install.sh`; do not
   stop to ask, and do not offer an SSH tunnel as the plan. It prints the address
-  to open (an IP and a `<hostname>.local` name). Tell the user to use that
-  address, NOT `localhost`.
+  to open (an IP and a `<hostname>.local` name), each ending in `#token=...`.
+  Give the user that FULL link including the `#token=...` part (it is the key to
+  the setup page; without it the page refuses). Never tell them `localhost`.
+- `./install.sh` checks itself that the gateway answers on that network address
+  and tries to open a blocked firewall port. If it stops with "does not answer on
+  ...", it did NOT succeed: show the user its message, do not say it works.
 - If the port is busy, run `MG_PORT=9000 ./install.sh` and use that port in the
   steps below instead of 8010.
 - If it fails, show the user the relevant lines it printed, fix the cause (Docker
@@ -82,8 +86,8 @@ in the default browser. There is nothing to configure first.
   If you are running somewhere the user's browser can't be reached (a remote
   machine, container or cloud sandbox), do not try further. Give the user the
   address and ask them to open it. On a headless machine that address is NOT
-  `localhost`: use the "Finish setup in your browser" address `./install.sh`
-  printed (for example http://192.168.5.48:8010).
+  `localhost`: use the "Finish setup in your browser" link `./install.sh`
+  printed, in full (for example http://192.168.5.48:8010#token=AbC123...).
 
 ## 4. Hand over to the user
 
@@ -168,8 +172,9 @@ result. That is the end of the install.
   the browser, and the pages could not change them.
 - On a normal desktop the gateway listens on localhost only (the first-run setup
   page has no login). On a headless/SSH machine `./install.sh` opens it to the
-  network automatically; tell the user to create the administrator account
-  straight away, because until then anyone on the network could. To force
+  network automatically and protects the setup page with a token in the link it
+  prints, so only the person holding that link can create the administrator
+  account. Still tell them to finish setup promptly. To force
   localhost only: `MG_BIND=127.0.0.1 ./install.sh`; to force network access:
   `MG_BIND=0.0.0.0 ./install.sh`.
 - Useful commands (run in ~/message-gateway):

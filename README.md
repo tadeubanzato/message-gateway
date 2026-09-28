@@ -360,11 +360,11 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
 ## 7. Security notes
 
 - **Localhost on a desktop, network-visible on a headless server.** The first-run setup page has
-  no login, so anyone who can reach it before an administrator account exists could create it.
-  On a desktop the gateway therefore listens on `127.0.0.1` only. On a headless server
-  `./install.sh` opens it to your network (your browser is on another computer) - create the
-  administrator account straight away, and put it behind HTTPS if it faces anything beyond your
-  own network. Override with `MG_BIND=127.0.0.1` (this machine only) or `MG_BIND=0.0.0.0`.
+  no login. On a desktop the gateway therefore listens on `127.0.0.1` only. On a headless server
+  `./install.sh` opens it to your network (your browser is on another computer) and protects the
+  setup page with a one-time token: the installer prints a link ending in `#token=...`, and only
+  someone with that link can create the administrator account. Put it behind HTTPS if it faces
+  anything beyond your own network. Override with `MG_BIND=127.0.0.1` or `MG_BIND=0.0.0.0`.
 - **Administrator vs members.** The first account is the administrator. Sign-ups are off by
   default. Members can send messages but can't change settings. Everything under Channels and
   Settings requires the administrator's login session.

@@ -41,6 +41,15 @@ URL="http://localhost:${PORT}"
 export MG_PORT="$PORT"
 export MG_BIND="$BIND"
 
+# When the gateway is reachable from the network, the first-run setup page needs a
+# one-time link token, so nobody else on the network can claim the administrator
+# account before you do. (Localhost-only installs don't need it.)
+if [ "$BIND" != "127.0.0.1" ] && [ -z "${MG_SETUP_TOKEN:-}" ]; then
+  MG_SETUP_TOKEN="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 24 || true)"
+  [ -n "$MG_SETUP_TOKEN" ] || MG_SETUP_TOKEN="$(date +%s%N | shasum | head -c 24)"
+fi
+export MG_SETUP_TOKEN="${MG_SETUP_TOKEN:-}"
+
 say()  { printf '%s\n' "$*"; }
 fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -79,7 +88,8 @@ if [ "$ok" -ne 1 ]; then
 fi
 
 # ---- 5. done ----------------------------------------------------------------
-LAN_IP=""; LAN_URL=""; NAME_URL=""
+LAN_IP=""; LAN_URL=""; NAME_URL=""; TOKEN_FRAG=""
+[ -n "${MG_SETUP_TOKEN:-}" ] && TOKEN_FRAG="#token=${MG_SETUP_TOKEN}"
 if [ "$BIND" != "127.0.0.1" ]; then
   # Best guess at this machine's address on the local network (skips Docker/VM bridges).
   if command -v hostname >/dev/null 2>&1; then
@@ -91,6 +101,22 @@ if [ "$BIND" != "127.0.0.1" ]; then
   [ -n "$LAN_IP" ] && LAN_URL="http://${LAN_IP}:${PORT}"
   HOST_NAME="$(hostname -s 2>/dev/null || true)"
   [ -n "$HOST_NAME" ] && NAME_URL="http://${HOST_NAME}.local:${PORT}"
+
+  # Prove it works from the network side, not just from localhost - and if a
+  # firewall is in the way, open the port when we are allowed to (never prompts).
+  if [ -n "$LAN_URL" ] && ! curl -fsS -m 5 "${LAN_URL}/health" >/dev/null 2>&1; then
+    if command -v ufw >/dev/null 2>&1 && sudo -n ufw status 2>/dev/null | grep -q "Status: active"; then
+      say "A firewall (ufw) is blocking port ${PORT}; opening it..."
+      sudo -n ufw allow "${PORT}/tcp" >/dev/null 2>&1 || true
+    elif command -v firewall-cmd >/dev/null 2>&1 && sudo -n firewall-cmd --state >/dev/null 2>&1; then
+      say "A firewall (firewalld) is blocking port ${PORT}; opening it..."
+      sudo -n firewall-cmd --permanent --add-port="${PORT}/tcp" >/dev/null 2>&1 && sudo -n firewall-cmd --reload >/dev/null 2>&1 || true
+    fi
+    sleep 2
+    if ! curl -fsS -m 5 "${LAN_URL}/health" >/dev/null 2>&1; then
+      fail "The gateway is running, but it does not answer on ${LAN_URL}, so other computers can't reach it. A firewall on this machine is the usual cause. Open the port (Linux:  sudo ufw allow ${PORT}/tcp   or   sudo firewall-cmd --permanent --add-port=${PORT}/tcp && sudo firewall-cmd --reload ), then run ./install.sh again. To use it from this machine only:  MG_BIND=127.0.0.1 ./install.sh"
+    fi
+  fi
 fi
 
 say ""
@@ -98,27 +124,21 @@ say "Message Gateway is running."
 say ""
 if [ -n "$LAN_URL" ]; then
   say "  Finish setup in your browser (from any computer on your network):"
-  say "      ${LAN_URL}"
-  [ -n "$NAME_URL" ] && say "      ${NAME_URL}   (if your network resolves .local names)"
+  say "      ${LAN_URL}${TOKEN_FRAG}"
+  [ -n "$NAME_URL" ] && say "      ${NAME_URL}${TOKEN_FRAG}   (if your network resolves .local names)"
   say ""
+  say "  Use the whole link, including the part after the #: it is the key to the setup"
+  say "  page, so only people you give it to can create the administrator account."
+  say "  (Lost it? Run ./install.sh again and it prints a new one.)"
+  say ""
+  [ "$BIND_AUTO" = "1" ] && say "  This machine has no desktop, so it is reachable from your network. To keep it to this"
+  [ "$BIND_AUTO" = "1" ] && say "  machine only:  MG_BIND=127.0.0.1 ./install.sh" && say ""
 else
   say "  Finish setup in your browser:  ${URL}"
   say ""
-fi
-if [ "$BIND" != "127.0.0.1" ]; then
-  if [ "$BIND_AUTO" = "1" ]; then
-    say "  This machine has no desktop, so it is reachable from your network (your browser is"
-    say "  probably on another computer). To keep it to this machine only:  MG_BIND=127.0.0.1 ./install.sh"
-  else
-    say "  Reachable from other machines (MG_BIND=${BIND})."
-  fi
-  say "  The setup page has no login until you create the administrator account below,"
-  say "  so finish that first if anyone you don't trust is on this network."
-  say ""
-  # Prove it from the network side, not just from localhost.
-  if [ -n "$LAN_IP" ] && ! curl -fsS -m 5 "http://${LAN_IP}:${PORT}/health" >/dev/null 2>&1; then
-    say "  WARNING: the gateway is running but did not answer on ${LAN_URL} from this machine."
-    say "  A firewall is the usual cause (e.g. Linux:  sudo ufw allow ${PORT}/tcp )."
+  if [ "$BIND" != "127.0.0.1" ]; then
+    say "  Could not work out this machine's network address. Open it with this machine's IP"
+    say "  address and port ${PORT}, followed by ${TOKEN_FRAG}"
     say ""
   fi
 fi
@@ -148,10 +168,11 @@ open_url() {
   esac
 }
 
+OPEN_ADDR="${LAN_URL:-$URL}${TOKEN_FRAG}"
 if [ "${MG_NO_OPEN:-0}" = "1" ]; then
-  say "Browser not opened (MG_NO_OPEN=1). Open this address yourself: ${LAN_URL:-$URL}"
-elif open_url "$URL"; then
+  say "Browser not opened (MG_NO_OPEN=1). Open this address yourself: ${OPEN_ADDR}"
+elif open_url "${URL}${TOKEN_FRAG}"; then
   say "Opened the setup page in your default browser: ${URL}"
 else
-  say "Could not open a browser automatically. Open this address yourself: ${LAN_URL:-$URL}"
+  say "Could not open a browser automatically. Open this address yourself: ${OPEN_ADDR}"
 fi

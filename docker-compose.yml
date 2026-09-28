@@ -15,6 +15,10 @@ services:
 
     environment:
       GATEWAY_BASE_URL: http://localhost:${MG_PORT:-8010}
+      # Set by install.sh: the first-run setup needs this token, so the gateway can be
+      # reachable from your network before the administrator exists without anyone
+      # else being able to claim it.
+      MG_SETUP_TOKEN: ${MG_SETUP_TOKEN:-}
 
     ports:
       # Bound to localhost by default, on purpose: the first-run setup page has

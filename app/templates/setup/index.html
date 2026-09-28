@@ -81,9 +81,22 @@
 
 <script>
 const $ = (s, r = document) => r.querySelector(s);
+// The installer's link ends in #token=... (a fragment is never sent to the server or logged).
+let SETUP_TOKEN = "";
+try {
+  const m = location.hash.match(/token=([^&]+)/);
+  if (m) { SETUP_TOKEN = decodeURIComponent(m[1]); sessionStorage.setItem("mg_setup_token", SETUP_TOKEN); }
+  else SETUP_TOKEN = sessionStorage.getItem("mg_setup_token") || "";
+} catch (e) {}
 const api = async (path, body) => {
-  const res = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const headers = { "X-Setup-Token": SETUP_TOKEN };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) });
   let data = {}; try { data = await res.json(); } catch (e) {}
+  if (res.status === 401) {
+    document.body.innerHTML = '<div style="max-width:520px;margin:15vh auto;font-family:system-ui,sans-serif;padding:0 16px"><h2>Use the setup link</h2><p>This setup page needs the full link that the installer printed. It ends in <code>#token=...</code>. To get it again, run <code>./install.sh</code> on the server; it prints the link.</p></div>';
+    throw new Error("Setup token required.");
+  }
   if (res.status === 403) { window.location = "/gateway"; throw new Error("Setup is already complete."); }
   return data;
 };
