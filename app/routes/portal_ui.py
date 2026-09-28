@@ -320,6 +320,14 @@ def channel_defaults_save(request: Request, channel: str, body: DefaultsBody):
     return result
 
 
+@router.post("/gateway/channels/telegram/find-chats", include_in_schema=False)
+def telegram_find_chats(request: Request):
+    """Recent chat ids the saved bot has been messaged from - Telegram bots can't look this up
+    any other way, so this is the only way to find one short of asking the user to read raw JSON."""
+    _owner_or_error(request)
+    return channels.telegram_recent_chats()
+
+
 @router.post("/gateway/channels/{channel}/test", include_in_schema=False)
 def channel_test(request: Request, channel: str, body: TestBody):
     _known_channel(channel)
@@ -330,6 +338,15 @@ def channel_test(request: Request, channel: str, body: TestBody):
     if channel == "sms" and not to and not channels.default_sms_number():
         return {"ok": False, "error": "Enter a phone number to send the test to, or set a default phone number on this page."}
     if channel == "sms" and to:
+        try:
+            to = normalize_phone(to)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+    if channel == "telegram" and not to and not channels.default_telegram_chat_id():
+        return {"ok": False, "error": "Enter a chat ID to send the test to, or set a default chat ID on this page."}
+    if channel == "whatsapp" and not to and not channels.default_whatsapp_number():
+        return {"ok": False, "error": "Enter a phone number to send the test to, or set a default recipient on this page."}
+    if channel == "whatsapp" and to:
         try:
             to = normalize_phone(to)
         except ValueError as e:

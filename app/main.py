@@ -22,7 +22,7 @@ from app.routes.portal_ui import router as portal_ui_router
 from app.services import access, channels, message_log
 from app.services.env import public_base_url
 from app.version import APP_NAME, APP_VERSION
-from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, MessageRequest, MessageResponse
+from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, TelegramMessage, WhatsAppMessage, MessageRequest, MessageResponse
 
 # The MCP server is served from this same FastAPI app (same port, path
 # /mcp) rather than run as a separate process/port. Two gotchas discovered
@@ -151,9 +151,9 @@ That exact command (with your real values) is shown once right after you create 
 **About** page in the web app has a short natural-language prompt you can paste into any agent instead. Once
 connected, an agent discovers the available tools itself; broadly, they cover:
 
-- **Sending** - `send_email`, `send_sms`, `send_push`, `send_test`, and a general `send_notification`. Same
-  validation, logging and on/off checks as this REST API - a message through a turned-off provider gets the same
-  `403` shown above.
+- **Sending** - `send_email`, `send_sms`, `send_push`, `send_telegram`, `send_whatsapp`, `send_test`, and a general `send_notification`.
+  Same validation, logging and on/off checks as this REST API - a message through a turned-off provider gets the
+  same `403` shown above.
 - **Discovery** - `list_providers`, `get_setup_status`, `get_setup_instructions`, `get_health`.
 - **Your message history** - `list_recent_messages`, `get_message`, `list_delivery_attempts` (scoped to messages
   sent under the connecting account's own keys).
@@ -174,6 +174,8 @@ API_TAGS = [
     {"name": "Email", "description": "Send an email, as plain text or from a saved template."},
     {"name": "SMS", "description": "Send a text message, as plain text or from a saved template."},
     {"name": "Push", "description": "Send a push notification."},
+    {"name": "Telegram", "description": "Send a Telegram message via a bot."},
+    {"name": "WhatsApp", "description": "Send a WhatsApp message via the WhatsApp Business Platform (Cloud API)."},
 ]
 
 GATEWAY_BASE_URL = (os.environ.get("GATEWAY_BASE_URL") or "http://localhost:8010").strip().rstrip("/")
@@ -369,6 +371,20 @@ def enqueue_message(req: MessageRequest, account_id: Optional[str]) -> MessageRe
                 status_code=400,
                 detail="Missing 'to'. Give a phone number, or ask the administrator to set a default phone number (Channels > SMS).",
             )
+        elif channel == "telegram" and channels.default_telegram_chat_id():
+            recipients = [channels.default_telegram_chat_id()]
+        elif channel == "telegram":
+            raise HTTPException(
+                status_code=400,
+                detail="Missing 'to'. Give a chat ID, or ask the administrator to set a default chat ID (Channels > Telegram).",
+            )
+        elif channel == "whatsapp" and channels.default_whatsapp_number():
+            recipients = [channels.default_whatsapp_number()]
+        elif channel == "whatsapp":
+            raise HTTPException(
+                status_code=400,
+                detail="Missing 'to'. Give a phone number, or ask the administrator to set a default recipient (Channels > WhatsApp).",
+            )
         else:
             raise HTTPException(status_code=400, detail="Missing 'to' recipient(s)")
 
@@ -521,8 +537,30 @@ The request:
 
 What is delivered: `Hi Ana, welcome! Your account is now active.`
 """
+_TELEGRAM_DESC = """
 
+### Set up Telegram first
 
+Telegram needs a bot connected in the web app under **Channels > Telegram**. In Telegram, open
+@BotFather, send `/newbot`, and follow the prompts - it replies with a **bot token**. Paste that
+token in the web app. Telegram bots can't message someone first: whoever should receive messages
+has to open the bot and send it anything once. After that, use **Find chat IDs** in the web app to
+look up their chat ID, and either set it as the **default chat ID** or pass it as `to`.
+"""
+_WHATSAPP_DESC = """
+
+### Set up WhatsApp first
+
+WhatsApp needs the WhatsApp Business Platform (Meta's Cloud API) connected in the web app under
+**Channels > WhatsApp** - a Phone Number ID and an access token from a Meta developer app. See
+that page for the full setup (a permanent token needs a System User, not the 24-hour token the
+API Setup page gives you by default).
+
+**The 24-hour window.** WhatsApp only delivers a free-form message like this API sends if the
+recipient has messaged your WhatsApp number in the last 24 hours - anyone else needs a
+pre-approved message template, which this endpoint doesn't send. A message outside the window
+fails with a clear `error` explaining that, not a delivered status.
+"""
 _PUSH_DESC = """
 
 ### Set up push first
@@ -591,6 +629,18 @@ def send_sms_template(req: SmsTemplateMessage = Body(examples=[{"to": "+15551234
 @_post("/v1/messages/push", "Push", "Send a push notification", _SEND_DESC + _PUSH_DESC)
 def send_push(req: PushMessage = Body(examples=[{"subject": "Deploy finished", "body": "Version 1.4 is live.", "app": "alerts"}]),
               auth: dict = Depends(require_api_key)):
+    return enqueue_message(req.to_request(), auth.get("account_id"))
+
+
+@_post("/v1/messages/telegram", "Telegram", "Send a Telegram message", _SEND_DESC + _TELEGRAM_DESC)
+def send_telegram(req: TelegramMessage = Body(examples=[{"to": "123456789", "body": "Running late, back soon."}]),
+                   auth: dict = Depends(require_api_key)):
+    return enqueue_message(req.to_request(), auth.get("account_id"))
+
+
+@_post("/v1/messages/whatsapp", "WhatsApp", "Send a WhatsApp message", _SEND_DESC + _WHATSAPP_DESC)
+def send_whatsapp(req: WhatsAppMessage = Body(examples=[{"to": "+15551234567", "body": "Running late, back soon."}]),
+                   auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
 

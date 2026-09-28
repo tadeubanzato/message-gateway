@@ -80,7 +80,7 @@ def record_final(message_id: str, status: str) -> None:
         pass
 
 
-def channel_trend(account_id: str, days: int = 14, channels: tuple[str, ...] = ("email", "sms", "push")) -> dict[str, Any]:
+def channel_trend(account_id: str, days: int = 14, channels: tuple[str, ...] = ("email", "sms", "push", "telegram", "whatsapp")) -> dict[str, Any]:
     """Per-day, per-channel counts for the last `days` days (UTC), for the home
     page trend chart. Counts every message queued that day, regardless of how
     delivery went. Content is never decrypted for this - only channel and date."""

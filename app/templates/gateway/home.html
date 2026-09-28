@@ -12,6 +12,8 @@
     <a class="btn" href="/gateway/channels/push">Set up Push</a>
     <a class="btn ghost" href="/gateway/channels/email">Set up Email</a>
     <a class="btn ghost" href="/gateway/channels/sms">Set up SMS</a>
+    <a class="btn ghost" href="/gateway/channels/telegram">Set up Telegram</a>
+    <a class="btn ghost" href="/gateway/channels/whatsapp">Set up WhatsApp</a>
   </div>
 </div>
 {% endif %}
@@ -43,7 +45,7 @@
 <div class="card">
   <div class="row between"><h2 style="margin:0">Messages by channel</h2><a href="/gateway/messages">View all</a></div>
   <p class="muted" style="margin:4px 0 14px">Last 14 days, by when each message was sent.</p>
-  {% if trend.totals.email or trend.totals.sms or trend.totals.push %}
+  {% if trend.totals.email or trend.totals.sms or trend.totals.push or trend.totals.telegram or trend.totals.whatsapp %}
     <div style="position:relative; height:300px">
       <canvas id="trendChart"></canvas>
     </div>
@@ -73,7 +75,7 @@
   var canvas = document.getElementById("trendChart");
   if (!dataEl || !canvas || typeof Chart === "undefined") return;
   var D = JSON.parse(dataEl.textContent);
-  var CHANNELS = [{ key: "email", label: "Email" }, { key: "sms", label: "SMS" }, { key: "push", label: "Push" }];
+  var CHANNELS = [{ key: "email", label: "Email" }, { key: "sms", label: "SMS" }, { key: "push", label: "Push" }, { key: "telegram", label: "Telegram" }, { key: "whatsapp", label: "WhatsApp" }];
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   function dayLabel(iso) { var p = iso.split("-"); return MONTHS[parseInt(p[1], 10) - 1] + " " + parseInt(p[2], 10); }
   var labels = D.days.map(dayLabel);

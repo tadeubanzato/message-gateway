@@ -1,14 +1,14 @@
 # Message Gateway
 
-A self-hosted gateway for sending **email, SMS and push notifications** through one API.
-One Docker container, one place to connect your providers, and a full log of everything
+A self-hosted gateway for sending **email, SMS, push, Telegram and WhatsApp messages** through
+one API. One Docker container, one place to connect your providers, and a full log of everything
 that was sent. You set it up in your browser: there is no config file to edit, and your
 credentials are stored **encrypted** in the database you choose.
 
-- **Three channels, several providers each.** Email (Mailjet, SendGrid), SMS (your own HTTP
-  endpoint, Twilio, Infobip or Sinch) and push (Pushover, ntfy). Connect more than one per
-  channel, pick a default, or choose per message - and turn any connected provider on or off
-  without disconnecting it.
+- **Five channels, several providers each.** Email (Mailjet, SendGrid), SMS (your own HTTP
+  endpoint, Twilio, Infobip or Sinch), push (Pushover, ntfy), Telegram (a bot you create) and
+  WhatsApp (the official WhatsApp Business Platform). Connect more than one per channel, pick a
+  default, or choose per message - and turn any connected provider on or off without disconnecting it.
 - **Dashboard.** A per-channel message trend chart on Home, and a full message log: time,
   recipient, content (encrypted), status, provider, attempts and errors.
 - **Works with AI agents.** Connect Claude Code (or any MCP client) and just say
@@ -73,9 +73,9 @@ The setup page opens automatically. It has three steps:
      your IP under *Network Access* and use a user with read/write access. If the database
      already holds a gateway's data, you simply reconnect to it.
 2. **Create the administrator account.** Enter a name, email and a strong password. The
-   administrator can change all settings, connect and add email/SMS/push providers, manage
-   API keys and decide whether anyone else may sign up. Passwords can't be reset by email,
-   so keep it safe. You can also choose whether to keep a full message log (on by default).
+   administrator can change all settings, connect and add email/SMS/push/Telegram/WhatsApp providers,
+   manage API keys and decide whether anyone else may sign up. Passwords can't be reset by
+   email, so keep it safe. You can also choose whether to keep a full message log (on by default).
 3. **Save your API key.** Your user key and API token are shown **once**. Store them in a
    password manager. This screen also shows a ready-made command to connect an AI agent
    (see [section 5](#5-connect-an-ai-agent-mcp)).
@@ -88,7 +88,7 @@ You land on the **Home** page, which shows each channel's status. Next, connect 
 
 ## 3. Connect your channels
 
-Open **Channels** in the top menu (administrator only) and choose Email, SMS or Push. Pick your
+Open **Channels** in the top menu (administrator only) and choose Email, SMS, Push, Telegram or WhatsApp. Pick your
 provider (for example Pushover), and you see only that provider's form, with links (opening in a
 new tab) to sign in and find your keys. Fill in the fields and click **Connect**. The gateway checks the
 credentials, then **Send test** lets you confirm a real message arrives.
@@ -173,6 +173,46 @@ letters, numbers, dots, dashes and underscores. Tokens are stored encrypted, in 
 PUSHOVER_APPS=alerts:PUSHOVER_APPTOKEN_ALERTS,backups:PUSHOVER_APPTOKEN_BACKUPS
 ```
 
+### Telegram
+
+| Provider | What you need |
+|---|---|
+| **Telegram Bot** | A bot token from @BotFather (the only way to send Telegram messages) |
+
+In Telegram, open **@BotFather** and send `/newbot`. Follow the prompts to name your bot;
+BotFather replies with a **bot token** that looks like `123456789:AAH-...` - paste it in the web
+app. That's the whole setup on Telegram's side.
+
+**Finding a chat ID.** Telegram bots can't message someone first: whoever should receive
+messages has to open your bot and send it anything once. After that, save your bot token and
+click **Find chat IDs** on the Telegram page - it looks up everyone who's recently messaged your
+bot and lets you click one to fill in a chat ID, no copying numbers out of raw JSON.
+
+**Default chat ID.** Like SMS's default phone number, *Channel defaults* on the Telegram page
+lets you set a chat ID used whenever a message doesn't say who to notify.
+
+### WhatsApp
+
+| Provider | What you need |
+|---|---|
+| **WhatsApp Business Platform** | A Phone Number ID and access token from a Meta developer app (the official Cloud API - not a third-party wrapper) |
+
+1. Create an app at [developers.facebook.com](https://developers.facebook.com/) and add the
+   **WhatsApp** product.
+2. Its API Setup page shows a **Phone Number ID** and a temporary access token - the Phone
+   Number ID is permanent, paste it in the web app.
+3. That temporary token expires in 24 hours. For one that keeps working, go to **Business
+   Settings → System users**, create a system user, assign it the app and the WhatsApp Business
+   Account with full control, and **Generate token** there instead. Paste that token in the web app.
+
+**The 24-hour window.** This is WhatsApp's own rule, not something the gateway adds: a free-form
+message only delivers if the recipient has messaged your WhatsApp number in the last 24 hours.
+Anyone else needs a pre-approved message *template* (an HSM), which this gateway doesn't send -
+sending to someone outside the window fails with a clear error explaining why, not a silent drop.
+
+**Default recipient.** *Channel defaults* on the WhatsApp page lets you set a phone number used
+whenever a message doesn't say who to notify - same 24-hour rule applies to it.
+
 ## 4. Send your first message
 
 Every request needs two headers: `X-User-Key` (your account, `gw_user_...`, never changes) and
@@ -191,20 +231,24 @@ curl -X POST http://localhost:8010/v1/messages/push \
 ```
 
 Each channel has its own endpoint: `POST /v1/messages/push`, `/v1/messages/email`,
-`/v1/messages/sms`, and `/v1/messages/email/template` and `/v1/messages/sms/template` for saved templates.
-The API reference at `/scalar` documents each one.
+`/v1/messages/sms`, `/v1/messages/telegram`, `/v1/messages/whatsapp`. Email and SMS also have a
+`/template` variant (e.g. `/v1/messages/sms/template`) for saved templates - push, Telegram and
+WhatsApp don't use templates, just send `body` directly. The API reference at `/scalar` documents
+each one.
 
 | Channel | Fields |
 |---|---|
 | `push` | `body`; optional `subject` (title), `app` (Pushover app **name**), `device`, `url`, `url_title`, `to` |
 | `email` | `to`, `subject`, `body`; optional `emailType` (`txt` or `html`) |
 | `sms` | `body`; `to`, or omit it to use the default phone number |
+| `telegram` | `body`; `to` (a chat ID), or omit it to use the default chat ID |
+| `whatsapp` | `body`; `to`, or omit it to use the default recipient - only delivers within the 24-hour window |
 
 Every channel also accepts:
 
 - **`provider`**: pick a connected provider for this message, e.g. `"provider": "sendgrid"`.
   Without it the channel's default is used.
-- **`template` + `context`** (email and SMS): use a saved template instead of `body`. See below.
+- **`template` + `context`** (email and SMS only): use a saved template instead of `body`. See below.
 
 ### Templates (email and SMS)
 
@@ -237,7 +281,7 @@ Ana receives the subject `Welcome, Ana` and the `welcome.txt` body with her name
 - **Strict by default**: a placeholder with no value in `context` returns a 400. Set
   `TEMPLATE_STRICT=false` to fill it with an empty string instead. An unknown template name is a 400.
 - The folders are mounted into the container, so new templates are picked up without a rebuild.
-- Push notifications don't use templates; send `body` directly.
+- Push, Telegram and WhatsApp don't use templates; send `body` directly.
 
 `to` may be a list. If nothing is connected for the channel, the API answers immediately with
 a clear error instead of queueing a message that can't be delivered.
@@ -265,6 +309,8 @@ Then just ask, for example:
 - "Send a test email."
 - "Send an SMS to +1 555 123 4567 saying I'm running late."
 - "Text me that dinner is ready." (uses the default phone number)
+- "Send that to me on Telegram instead." (uses the default chat ID)
+- "WhatsApp me the tracking number." (only works if you've messaged the bot's WhatsApp number in the last 24 hours)
 - "Which providers are connected? Did my last message get delivered?"
 
 Each send waits a few seconds and reports **delivered** or **failed** with the reason. Phone
@@ -275,7 +321,7 @@ instead - the same `403` the HTTP API returns.
 
 | Tool | Use |
 |---|---|
-| `send_push`, `send_email`, `send_sms`, `send_test` | The common sends. `send_test` with no address emails **you** |
+| `send_push`, `send_email`, `send_sms`, `send_telegram`, `send_whatsapp`, `send_test` | The common sends. `send_test` with no address emails **you** |
 | `send_notification` | Any channel, templates, full control |
 | `list_providers`, `get_setup_status`, `get_setup_instructions`, `get_health` | See what's connected and where to set up the rest |
 | `list_recent_messages`, `get_message`, `list_delivery_attempts` | Your own messages and their delivery |
@@ -342,6 +388,10 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
 | A send returns "… is turned off on the gateway" | That provider is connected but switched off - click its Enabled/Disabled pill on the Channels page to turn it back on, or pick a different connected provider with `"provider"` |
 | Mail is rejected | The sender address must be verified with Mailjet/SendGrid |
 | SMS says "failed" with your endpoint | Check the URL, headers and body preview; add or fix the "response must contain" text |
+| Telegram "Find chat IDs" shows nothing | Open your bot in Telegram and send it any message first - bots can't message someone who hasn't messaged them |
+| Telegram send fails ("chat not found" / "bot was blocked") | The chat ID is wrong, or that user blocked/never started the bot - use **Find chat IDs** to get a fresh one |
+| WhatsApp send fails ("more than 24 hours have passed") | The recipient hasn't messaged your WhatsApp number recently enough - free-form messages need a reply within the last 24 hours; a message template would be required otherwise, which isn't supported here |
+| WhatsApp send fails with an OAuth/token error | The access token expired (the 24-hour one from the API Setup page) or is wrong - generate a permanent one via a System User instead (see the WhatsApp section above) |
 | Forgot the administrator password | Passwords can't be reset by email; restore from a backup, or reinstall with `docker compose down -v` |
 | Anything else | `docker compose logs gateway` |
 
@@ -380,7 +430,9 @@ app/
   services/          channels, encrypted settings, message log, providers
     sms/custom_http  your own SMS endpoint (URL, headers, JSON pattern)
     sms/sinch, twilio, infobip  the other SMS providers
-  workers/           email / sms / push consumers (retry + dead letters)
+    telegram/bot_api  Telegram Bot API (send, check token, find chat ids)
+    whatsapp/cloud_api  WhatsApp Business Platform / Meta Cloud API
+  workers/           email / sms / push / telegram / whatsapp consumers (retry + dead letters)
   mcp_server/        MCP tools and their key-based login
   templates/         pages (Jinja)
   static/            shared stylesheet and script; static/vendor/ has Chart.js,
