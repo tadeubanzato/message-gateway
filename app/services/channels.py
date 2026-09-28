@@ -18,9 +18,10 @@ from app.services.env import get_env
 from app.services.push import get_push_provider
 from app.services.sms import get_sms_provider
 from app.services.telegram import get_telegram_provider
+from app.services.whatsapp import get_whatsapp_provider
 
-DEFAULT_PROVIDER = {"email": "mailjet", "sms": "custom_http", "push": "pushover", "telegram": "bot_api"}
-CHANNEL_LABELS = {"email": "Email", "sms": "SMS", "push": "Push notifications", "telegram": "Telegram"}
+DEFAULT_PROVIDER = {"email": "mailjet", "sms": "custom_http", "push": "pushover", "telegram": "bot_api", "whatsapp": "cloud_api"}
+CHANNEL_LABELS = {"email": "Email", "sms": "SMS", "push": "Push notifications", "telegram": "Telegram", "whatsapp": "WhatsApp"}
 
 # Display text and badge color for each channel_status() state - defined once
 # here so home.html, channel.html and anything else showing a channel's status
@@ -189,6 +190,35 @@ CATALOG: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "whatsapp": {
+        "selector": "WHATSAPP_PROVIDER",
+        "getter": get_whatsapp_provider,
+        "providers": {
+            "cloud_api": {
+                "label": "WhatsApp Business Platform",
+                "blurb": 'Send via Meta’s official WhatsApp Cloud API. Needs a Meta Business/developer setup.',
+                "links": [
+                    {"label": "Meta for Developers", "url": "https://developers.facebook.com/"},
+                    {"label": "WhatsApp Cloud API: Get started", "url": "https://developers.facebook.com/docs/whatsapp/cloud-api/get-started"},
+                    {"label": "Business Settings (for a permanent token)", "url": "https://business.facebook.com/settings"},
+                ],
+                "help": (
+                    "Create a Meta app, add the WhatsApp product, and note the Phone Number ID from its API "
+                    "Setup page. Access tokens issued there expire in 24 hours - for a token that keeps "
+                    "working, create a System User under Business Settings > System users, assign it the app "
+                    "and the WhatsApp Business Account with full control, and generate its token there instead. "
+                    "Important: WhatsApp only delivers a free-form message if that person has messaged your "
+                    "WhatsApp number in the last 24 hours - anyone else needs a pre-approved message template, "
+                    "which isn't supported here."
+                ),
+                "fields": [
+                    {"name": "WHATSAPP_PHONE_NUMBER_ID", "label": "Phone number ID"},
+                    {"name": "WHATSAPP_ACCESS_TOKEN", "label": "Access token", "secret": True},
+                    {"name": "WHATSAPP_API_VERSION", "label": "Graph API version", "placeholder": "v26.0", "optional": True},
+                ],
+            },
+        },
+    },
 }
 
 
@@ -339,6 +369,11 @@ CHANNEL_DEFAULTS: dict[str, list[dict[str, Any]]] = {
          "help": "Used when a message doesn't say who to notify. Use Find chat IDs above to look yours up.",
          "placeholder": "123456789"},
     ],
+    "whatsapp": [
+        {"name": "WHATSAPP_DEFAULT_TO", "label": "Default phone number",
+         "help": "Used when a message doesn't say who to notify. Include the country code. They must have messaged your WhatsApp number in the last 24 hours.",
+         "placeholder": "+15551234567", "kind": "phone"},
+    ],
 }
 
 
@@ -348,6 +383,10 @@ def default_sms_number() -> Optional[str]:
 
 def default_telegram_chat_id() -> Optional[str]:
     return (get_env("TELEGRAM_DEFAULT_CHAT_ID") or "").strip() or None
+
+
+def default_whatsapp_number() -> Optional[str]:
+    return (get_env("WHATSAPP_DEFAULT_TO") or "").strip() or None
 
 
 def channel_defaults(channel: str) -> list[dict[str, Any]]:

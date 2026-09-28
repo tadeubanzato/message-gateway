@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
-Channel = Literal["push", "email", "sms", "telegram"]
+Channel = Literal["push", "email", "sms", "telegram", "whatsapp"]
 EmailType = Literal["txt", "html"]
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -15,8 +15,8 @@ _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 
 class MessageRequest(BaseModel):
-    channel: Channel = Field(description="Where to send: `email`, `sms`, `push` or `telegram`.")
-    to: Optional[Union[str, list[str]]] = Field(None, description="Recipient(s). An email address for `email`; a phone number with country code, e.g. `+15551234567`, for `sms` (omit to use the default phone number); a chat id for `telegram` (omit to use the default chat id); not needed for `push`. May be a list.")
+    channel: Channel = Field(description="Where to send: `email`, `sms`, `push`, `telegram` or `whatsapp`.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Recipient(s). An email address for `email`; a phone number with country code, e.g. `+15551234567`, for `sms` and `whatsapp` (omit to use the default phone number); a chat id for `telegram` (omit to use the default chat id); not needed for `push`. May be a list.")
     subject: Optional[str] = Field(None, description="Required for `email`. Used as the title for `push`.")
     body: Optional[str] = Field(None, description="The message text. Required unless `template` is given.")
     template: Optional[str] = Field(None, description="Name of a server-side template to use instead of `body`.")
@@ -154,6 +154,13 @@ class TelegramMessage(_ChannelMessage):
     to: Optional[Union[str, list[str]]] = Field(None, description="Chat id (a number, e.g. `123456789`), or a list. Find yours with 'Find chat IDs' in the web app (Channels > Telegram). Omit to use the default chat ID set in the web app.")
     body: str = Field(description="The message text.")
     provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `bot_api` (only if connected in the web app).")
+
+
+class WhatsAppMessage(_ChannelMessage):
+    _channel = "whatsapp"
+    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567`, or a list. Omit to use the default recipient set in the web app. Only delivers if this number has messaged your WhatsApp business number in the last 24 hours - see Channels > WhatsApp.")
+    body: str = Field(description="The message text.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `cloud_api` (only if connected in the web app).")
 
 
 class PushMessage(_ChannelMessage):

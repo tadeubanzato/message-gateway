@@ -140,10 +140,11 @@ dialog::backdrop { background:rgba(0,0,0,.45); }
 .editable-err { color:var(--err); font-size:12px; margin-top:4px; }
 
 /* per-channel identity, fixed per this gateway's own product convention (not the
-   generic categorical order): push = blue, sms = yellow, email = green, telegram = magenta. */
-:root { --series-push:#2a78d6; --series-sms:#eda100; --series-email:#1baf7a; --series-telegram:#a83fa8; }
+   generic categorical order): push = blue, sms = yellow, email = green,
+   telegram = magenta, whatsapp = red. */
+:root { --series-push:#2a78d6; --series-sms:#eda100; --series-email:#1baf7a; --series-telegram:#a83fa8; --series-whatsapp:#c22525; }
 @media (prefers-color-scheme: dark) {
-  :root { --series-push:#3987e5; --series-sms:#b8791a; --series-email:#0c9a83; --series-telegram:#c05ec0; }
+  :root { --series-push:#3987e5; --series-sms:#b8791a; --series-email:#0c9a83; --series-telegram:#c05ec0; --series-whatsapp:#bd2828; }
 }
 
 /* "Messages by channel" trend chart (home) is drawn by Chart.js (vendored in

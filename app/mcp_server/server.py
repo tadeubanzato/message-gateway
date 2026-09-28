@@ -48,11 +48,11 @@ mcp = FastMCP(
     name="message-gateway",
     streamable_http_path="/mcp",
     instructions=(
-        "Message Gateway sends email, SMS, push and Telegram messages through the providers its "
-        "administrator connected. Map requests to tools like this: 'send a push notification' -> "
+        "Message Gateway sends email, SMS, push, Telegram and WhatsApp messages through the providers "
+        "its administrator connected. Map requests to tools like this: 'send a push notification' -> "
         "send_push; 'send an email' -> send_email; 'send / text an SMS to <number>' -> send_sms; "
-        "'send a Telegram message' -> send_telegram; 'send a test email/sms/push' -> send_test; "
-        "anything else -> send_notification. Each send "
+        "'send a Telegram message' -> send_telegram; 'send a WhatsApp message' -> send_whatsapp; "
+        "'send a test email/sms/push' -> send_test; anything else -> send_notification. Each send "
         "waits a few seconds and reports delivered or failed, so you can tell the user the outcome. "
         "Use list_providers to see what is connected (and pass provider= to choose one). If a "
         "channel isn't set up, tell the user the administrator must connect it in the web app. "
@@ -60,6 +60,9 @@ mcp = FastMCP(
         "an administrator switched it off (Channels > that channel > that provider's card) - tell the "
         "user which provider and that they (or the administrator) can turn it back on there, or pick a "
         "different connected provider with provider=. "
+        "WhatsApp only delivers a free-form message if the recipient has messaged the business number "
+        "in the last 24 hours - if a send fails for that reason, tell the user plainly instead of "
+        "retrying; there is no template-message fallback here. "
         "Provider credentials are managed in the web app, never through this server: never ask "
         "the user to paste keys or passwords into chat."
     ),
@@ -133,7 +136,7 @@ def _view(doc: dict[str, Any], include_content: bool) -> dict[str, Any]:
 def _channel(channel: str) -> str:
     c = (channel or "").strip().lower()
     if c not in channels.CATALOG:
-        raise _Denied(f"Unknown channel {channel!r}. Use email, sms, push or telegram.")
+        raise _Denied(f"Unknown channel {channel!r}. Use email, sms, push, telegram or whatsapp.")
     return c
 
 
@@ -158,8 +161,10 @@ async def send_notification(
     send_sms or send_test when they fit. The message is queued, then this waits a few
     seconds and reports 'delivered' or 'failed' with the reason.
 
-    channel: 'email', 'sms', 'push' or 'telegram'.
-    to: recipient (email address, phone number, or Telegram chat id, or a list). Omit for push.
+    channel: 'email', 'sms', 'push', 'telegram' or 'whatsapp'.
+    to: recipient (email address, phone number, or Telegram chat id, or a list). Omit for push. For
+        whatsapp, only delivers if this number has messaged the WhatsApp business number in the last
+        24 hours.
     subject: required for email; the title for push.
     body: message text. Required unless `template` is given.
     template: name of a server-side template to use instead of `body`.
@@ -319,6 +324,36 @@ async def send_telegram(
 
 
 @tool()
+async def send_whatsapp(
+    ctx: Context,
+    body: str,
+    to: Union[str, list[str], None] = None,
+    provider: Optional[str] = None,
+    wait_seconds: int = 8,
+) -> dict:
+    """Send a WhatsApp message via the WhatsApp Business Platform. Use this when the user says
+    "send a WhatsApp message", "WhatsApp me" and the like.
+
+    body: the message text.
+    to: phone number including the country code, in any format ("+1 (555) 123-4567" works).
+        Leave it out to use the gateway's default recipient, if one is set. WhatsApp only
+        delivers a free-form message like this if that person has messaged the business's
+        WhatsApp number in the last 24 hours - if the send fails for that reason, tell the user
+        plainly; there's no template-message fallback here.
+    provider: which connected WhatsApp provider to use (default: the channel default).
+    wait_seconds: how long to wait for the delivery result (0 = don't wait).
+    """
+    recips = _recipients(to)
+    if recips is None:
+        if not channels.default_whatsapp_number():
+            return {"ok": False, "error": "Say which phone number to message (with country code), or ask the administrator to set a default recipient in the web app (Channels > WhatsApp)."}
+        return await _send(ctx, wait_seconds, channel="whatsapp", body=body, provider=provider)  # API fills in the default
+    numbers = [_phone(n) for n in (recips if isinstance(recips, list) else [recips])]
+    return await _send(ctx, wait_seconds, channel="whatsapp", to=numbers[0] if len(numbers) == 1 else numbers,
+                       body=body, provider=provider)
+
+
+@tool()
 async def send_test(
     ctx: Context,
     channel: str = "push",
@@ -400,6 +435,7 @@ def get_setup_status(ctx: Context) -> dict:
                 "setup_page": f"{GATEWAY_BASE_URL}/gateway/channels/{s['channel']}",
                 **({"default_phone_number_set": bool(channels.default_sms_number())} if s["channel"] == "sms" else {}),
                 **({"default_chat_id_set": bool(channels.default_telegram_chat_id())} if s["channel"] == "telegram" else {}),
+                **({"default_phone_number_set": bool(channels.default_whatsapp_number())} if s["channel"] == "whatsapp" else {}),
             }
             for s in channels.all_status()
         },
@@ -459,7 +495,7 @@ def list_recent_messages(
 ) -> dict:
     """Your recent messages, newest first (only messages sent with your key's account).
 
-    channel: 'email', 'sms', 'push' or 'telegram'. status: 'queued', 'delivered' or 'failed'.
+    channel: 'email', 'sms', 'push', 'telegram' or 'whatsapp'. status: 'queued', 'delivered' or 'failed'.
     search: match recipient, subject, text or message id.
     include_content: also return subject and body (off by default to keep results small).
     """
