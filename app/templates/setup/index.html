@@ -79,6 +79,7 @@
   </section>
 </div>
 
+<script src="/static/copy.js"></script>
 <script>
 const $ = (s, r = document) => r.querySelector(s);
 // The installer's link ends in #token=... (a fragment is never sent to the server or logged).
@@ -140,9 +141,7 @@ $("#create").onclick = async () => {
   finally { btn.disabled = false; btn.textContent = "Create administrator"; }
 };
 
-document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () => {
-  navigator.clipboard.writeText(document.getElementById(b.dataset.copy).textContent).then(() => { const o = b.textContent; b.textContent = "Copied"; setTimeout(() => b.textContent = o, 1400); });
-});
+document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () => copyText(document.getElementById(b.dataset.copy).textContent, b));
 </script>
 </body>
 </html>
