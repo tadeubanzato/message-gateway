@@ -64,6 +64,18 @@ say ""
 say "  Finish setup in your browser:  ${URL}"
 say ""
 if [ "$BIND" != "127.0.0.1" ]; then
+  # Best guess at this machine's address on the local network (skips Docker/VM bridges).
+  LAN_IP=""
+  if command -v hostname >/dev/null 2>&1; then
+    LAN_IP="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -Ev '^(172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.122\.|127\.|169\.254\.|$)' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+  fi
+  if [ -z "$LAN_IP" ] && command -v ipconfig >/dev/null 2>&1; then
+    LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
+  fi
+  if [ -n "$LAN_IP" ]; then
+    say "  Other machines on your network:  http://${LAN_IP}:${PORT}"
+    say ""
+  fi
   say "  Reachable from other machines too (MG_BIND=${BIND}). The setup page has no"
   say "  login until you create the administrator account below - finish that first"
   say "  if this machine is reachable by anyone you don't trust yet."

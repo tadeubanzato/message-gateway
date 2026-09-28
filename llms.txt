@@ -54,6 +54,14 @@ This builds the container (the first build takes a few minutes; be patient),
 starts it, waits until it reports healthy, and then tries to open the setup page
 in the default browser. There is nothing to configure first.
 
+- HEADLESS / REMOTE MACHINE (a server, a machine you reached over SSH, or one
+  with no desktop/browser): the user's browser is on ANOTHER computer, so
+  `localhost` is useless to them. Do not stop to ask about it and do not offer an
+  SSH tunnel as the plan. Install with `MG_BIND=0.0.0.0 ./install.sh` right away
+  (add `MG_PORT=...` if the port is busy). Signs of this case: `$SSH_CONNECTION`
+  is set, Linux with no `$DISPLAY` / `$WAYLAND_DISPLAY`, or the user said it is a
+  server. If you are unsure, ask once: "Will you open this from this machine's own
+  browser, or from another computer?"
 - If the port is busy, run `MG_PORT=9000 ./install.sh` and use that port in the
   steps below instead of 8010.
 - If it fails, show the user the relevant lines it printed, fix the cause (Docker
@@ -75,7 +83,12 @@ in the default browser. There is nothing to configure first.
 
   If you are running somewhere the user's browser can't be reached (a remote
   machine, container or cloud sandbox), do not try further. Give the user the
-  address and ask them to open it.
+  address and ask them to open it. On a headless machine that address is NOT
+  `localhost`: it is the machine's address on the user's network, printed by
+  `./install.sh` as "Other machines on your network". If it printed none, get it
+  with `hostname -I` (first address that is not a Docker/VM bridge such as
+  172.x or 192.168.122.x) and give `http://<that address>:8010`. The machine's
+  `<hostname>.local` name usually works too, but the IP is the reliable one.
 
 ## 4. Hand over to the user
 
@@ -153,9 +166,13 @@ result. That is the end of the install.
 - Do not create a `.env` file. Values in `.env` override what the user enters in
   the browser, and the pages could not change them.
 - The gateway listens on localhost only by default (the first-run setup page has
-  no login). To reach it from another machine, re-run with
-  `MG_BIND=0.0.0.0 ./install.sh` - ideally only after setup is finished or over a
-  trusted network/tunnel.
+  no login), which is right when the browser is on the same machine. When the
+  user is on another computer (headless/remote install) use
+  `MG_BIND=0.0.0.0 ./install.sh` as described in step 2, and tell the user to
+  create the administrator account straight away, because until then anyone on
+  the network could. Only if they say the network is not trusted, offer an SSH
+  tunnel instead (`ssh -L 8010:localhost:8010 user@host`, then open
+  http://localhost:8010).
 - Useful commands (run in ~/message-gateway):
     docker compose stop          stop it
     docker compose start         start it again
