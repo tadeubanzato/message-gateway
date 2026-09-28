@@ -344,6 +344,13 @@ def channel_test(request: Request, channel: str, body: TestBody):
             return {"ok": False, "error": str(e)}
     if channel == "telegram" and not to and not channels.default_telegram_chat_id():
         return {"ok": False, "error": "Enter a chat ID to send the test to, or set a default chat ID on this page."}
+    if channel == "whatsapp" and not to and not channels.default_whatsapp_number():
+        return {"ok": False, "error": "Enter a phone number to send the test to, or set a default recipient on this page."}
+    if channel == "whatsapp" and to:
+        try:
+            to = normalize_phone(to)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
     try:
         req = dispatch.build_test_request(channel, to, body.provider, body.app)
     except ValueError as e:

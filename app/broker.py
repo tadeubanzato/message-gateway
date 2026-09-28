@@ -35,6 +35,7 @@ QUEUE_NAMES = {
     "sms": os.environ.get("SMS_QUEUE_NAME", "notify.sms").strip(),
     "push": os.environ.get("PUSH_QUEUE_NAME", "notify.push").strip(),
     "telegram": os.environ.get("TELEGRAM_QUEUE_NAME", "notify.telegram").strip(),
+    "whatsapp": os.environ.get("WHATSAPP_QUEUE_NAME", "notify.whatsapp").strip(),
 }
 
 
