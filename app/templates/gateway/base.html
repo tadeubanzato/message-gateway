@@ -64,17 +64,13 @@
 {% endif %}
 {% block body %}<main class="wrap">{% block content %}{% endblock %}</main>{% endblock %}
 <script>
-  function copyText(text, btn) {
-    navigator.clipboard.writeText(text).then(function () {
-      var old = btn.textContent; btn.textContent = "Copied"; setTimeout(function () { btn.textContent = old; }, 1400);
-    });
-  }
   document.addEventListener("click", function (e) {
     document.querySelectorAll("details.user[open], details.dd[open]").forEach(function (d) {
       if (!d.contains(e.target)) d.removeAttribute("open");
     });
   });
 </script>
+<script src="/static/copy.js?v={{ ASSET_V }}"></script>
 <script src="/static/app.js?v={{ ASSET_V }}"></script>
 {% block scripts %}{% endblock %}
 </body>

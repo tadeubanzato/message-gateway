@@ -318,10 +318,11 @@ def get_started(request: Request):
       <h2>With an AI agent</h2>
       <p class="muted" style="margin-top:0">MCP server: <code>{mcp_url}</code>. Paste this prompt into Claude Code, Codex or any MCP-capable agent:</p>
       <pre><code id="prompt-text">{prompt}</code></pre>
-      <button class="btn ghost sm" onclick="navigator.clipboard.writeText(document.getElementById('prompt-text').innerText)">Copy prompt</button>
+      <button class="btn ghost sm" onclick="copyText(document.getElementById('prompt-text').innerText, this)">Copy prompt</button>
     </div>
     <p class="muted"><a href="/scalar">API reference</a></p>
   </main>
+  <script src="/static/copy.js"></script>
 </body>
 </html>"""
 
