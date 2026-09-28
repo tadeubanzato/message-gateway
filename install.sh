@@ -6,15 +6,19 @@
 #
 # Nothing to configure first: no .env file, no keys. You finish setup in the
 # browser. Options (environment variables):
-#   MG_PORT=9000     use a different port (default 8010)
-#   MG_NO_OPEN=1     don't open the browser automatically
+#   MG_PORT=9000       use a different port (default 8010)
+#   MG_BIND=0.0.0.0    reachable from other machines, not just this one (default
+#                      127.0.0.1 - see the warning this prints when you set it)
+#   MG_NO_OPEN=1       don't open the browser automatically
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 PORT="${MG_PORT:-8010}"
+BIND="${MG_BIND:-127.0.0.1}"
 URL="http://localhost:${PORT}"
 export MG_PORT="$PORT"
+export MG_BIND="$BIND"
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -59,10 +63,16 @@ say "Message Gateway is running."
 say ""
 say "  Finish setup in your browser:  ${URL}"
 say ""
+if [ "$BIND" != "127.0.0.1" ]; then
+  say "  Reachable from other machines too (MG_BIND=${BIND}). The setup page has no"
+  say "  login until you create the administrator account below - finish that first"
+  say "  if this machine is reachable by anyone you don't trust yet."
+  say ""
+fi
 say "  Two quick steps: choose where to store data, then create the administrator"
-say "  account. After that, connect your email / SMS / push providers from inside the"
-say "  app. Credentials are entered in the browser and stored encrypted in your"
-say "  database. There is no .env file to edit."
+say "  account. After that, connect your email / SMS / push / Telegram / WhatsApp"
+say "  providers from inside the app. Credentials are entered in the browser and"
+say "  stored encrypted in your database. There is no .env file to edit."
 say ""
 say "  Stop:       docker compose stop"
 say "  Start:      docker compose start"
