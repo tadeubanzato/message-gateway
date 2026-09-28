@@ -34,7 +34,7 @@
     sel.onchange = syncApp; syncApp();
     var to = dlg.querySelector("[data-to]");
     dlg.querySelector("[data-to-row]").classList.toggle("hidden", !needsTo);
-    to.placeholder = channel === "email" ? "you@example.com" : "+15551234567";
+    to.placeholder = channel === "email" ? "you@example.com" : channel === "telegram" ? "chat ID, e.g. 123456789" : "+15551234567";
     to.value = "";
     dlg.querySelector("[data-hint]").textContent = needsTo ? "" : "Sends a short test notification to your configured device.";
     var out = dlg.querySelector("[data-out]"); out.innerHTML = "";

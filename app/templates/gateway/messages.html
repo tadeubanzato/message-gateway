@@ -6,7 +6,7 @@
 
 <form method="get" action="/gateway/messages" class="row" style="margin-bottom:12px">
   <input name="q" value="{{ q }}" placeholder="Search recipient, subject, text or ID" style="flex:1;min-width:220px;max-width:360px" />
-  <select name="channel" style="width:auto"><option value="">All channels</option>{% for c in ["email","sms","push"] %}<option value="{{ c }}" {{ 'selected' if channel == c }}>{{ c }}</option>{% endfor %}</select>
+  <select name="channel" style="width:auto"><option value="">All channels</option>{% for c in ["email","sms","push","telegram"] %}<option value="{{ c }}" {{ 'selected' if channel == c }}>{{ c }}</option>{% endfor %}</select>
   <select name="status" style="width:auto"><option value="">Any status</option>{% for s in ["queued","delivered","failed"] %}<option value="{{ s }}" {{ 'selected' if status == s }}>{{ s }}</option>{% endfor %}</select>
   <label class="row" style="margin:0;gap:6px;color:var(--fg);font-size:13px"><input type="checkbox" name="tests" value="hide" style="width:auto" {{ 'checked' if hide_tests }} /> Hide tests</label>
   <button class="btn" type="submit">Filter</button>

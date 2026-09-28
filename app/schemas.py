@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
-Channel = Literal["push", "email", "sms"]
+Channel = Literal["push", "email", "sms", "telegram"]
 EmailType = Literal["txt", "html"]
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -15,8 +15,8 @@ _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 
 class MessageRequest(BaseModel):
-    channel: Channel = Field(description="Where to send: `email`, `sms` or `push`.")
-    to: Optional[Union[str, list[str]]] = Field(None, description="Recipient(s). An email address for `email`; a phone number with country code, e.g. `+15551234567`, for `sms` (omit to use the default phone number); not needed for `push`. May be a list.")
+    channel: Channel = Field(description="Where to send: `email`, `sms`, `push` or `telegram`.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Recipient(s). An email address for `email`; a phone number with country code, e.g. `+15551234567`, for `sms` (omit to use the default phone number); a chat id for `telegram` (omit to use the default chat id); not needed for `push`. May be a list.")
     subject: Optional[str] = Field(None, description="Required for `email`. Used as the title for `push`.")
     body: Optional[str] = Field(None, description="The message text. Required unless `template` is given.")
     template: Optional[str] = Field(None, description="Name of a server-side template to use instead of `body`.")
@@ -147,6 +147,13 @@ class SmsTemplateMessage(_ChannelMessage):
     template: str = Field(description=_SMS_TEMPLATE_DESC)
     context: dict[str, Any] = Field(default_factory=dict, description=_CONTEXT_DESC)
     provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `custom_http`, `twilio`, `infobip`, `sinch` (only the ones connected in the web app work).")
+
+
+class TelegramMessage(_ChannelMessage):
+    _channel = "telegram"
+    to: Optional[Union[str, list[str]]] = Field(None, description="Chat id (a number, e.g. `123456789`), or a list. Find yours with 'Find chat IDs' in the web app (Channels > Telegram). Omit to use the default chat ID set in the web app.")
+    body: str = Field(description="The message text.")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `bot_api` (only if connected in the web app).")
 
 
 class PushMessage(_ChannelMessage):

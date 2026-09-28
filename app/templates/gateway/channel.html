@@ -323,7 +323,7 @@
   function defaultsCard() {
     if (!status.defaults || !status.defaults.length) return null;
     const card = el("div", "card");
-    card.innerHTML = `<h3>Channel defaults</h3><div data-rows></div>
+    card.innerHTML = `<h3>Channel defaults</h3><div data-finder></div><div data-rows></div>
       <div class="actions"><button class="btn" data-save>Save defaults</button></div><div data-out></div>`;
     const rows = $("[data-rows]", card);
     for (const d of status.defaults) {
@@ -331,6 +331,33 @@
       const i = el("input"); i.dataset.name = d.name; i.value = d.value || ""; i.placeholder = d.placeholder || ""; i.autocomplete = "off"; i.style.maxWidth = "320px";
       const h = el("p", "help", d.help); h.style.margin = "4px 0 0";
       rows.append(l, i, h);
+    }
+    if (CH === "telegram") {
+      const finder = $("[data-finder]", card);
+      const fBtn = el("button", "btn ghost sm", "Find chat IDs"); fBtn.type = "button"; fBtn.style.marginBottom = "10px";
+      const fOut = el("div");
+      finder.append(fBtn, fOut);
+      fBtn.onclick = async () => {
+        fBtn.disabled = true; fBtn.textContent = "Looking…";
+        try {
+          const r = await post("/gateway/channels/telegram/find-chats", {});
+          if (!r.ok) { say(fOut, r.error || "Could not look this up.", "err"); }
+          else if (!r.chats || !r.chats.length) {
+            say(fOut, "No one has messaged your bot yet. Open it in Telegram and send it anything, then try again.", "err");
+          } else {
+            fOut.innerHTML = "";
+            const list = el("div", "row"); list.style.cssText = "gap:6px;flex-wrap:wrap";
+            for (const c of r.chats) {
+              const b = el("button", "btn ghost sm", (c.name || c.username || "Chat") + " · " + c.chat_id);
+              b.type = "button";
+              b.onclick = () => { rows.querySelector('[data-name="TELEGRAM_DEFAULT_CHAT_ID"]').value = c.chat_id; };
+              list.appendChild(b);
+            }
+            fOut.append(el("p", "help", "Click one to fill in the default chat ID below."), list);
+          }
+        } catch (e) { say(fOut, e.message, "err"); }
+        finally { fBtn.disabled = false; fBtn.textContent = "Find chat IDs"; }
+      };
     }
     $("[data-save]", card).onclick = async (ev) => {
       const values = {}; rows.querySelectorAll("input").forEach(i => values[i.dataset.name] = i.value.trim());

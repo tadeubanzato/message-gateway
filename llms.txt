@@ -2,7 +2,7 @@
 
 You are an AI coding agent (Claude Code, Codex CLI, or similar) with shell
 access. A user asked you to install Message Gateway, a self-hosted gateway for
-sending email, SMS and push notifications through one API.
+sending email, SMS, push and Telegram messages through one API.
 
 Your job has three parts, in this order:
 
@@ -85,24 +85,28 @@ Tell the user, in your own words:
     browser. Finish setup there. It takes a couple of minutes:
       1. Storage: keep the data on this computer (default), or use MongoDB Atlas.
       2. Create the administrator account. The administrator can change all
-         settings, connect and add email / SMS / push providers, and manage API
-         keys.
+         settings, connect and add email / SMS / push / Telegram providers, and
+         manage API keys.
       3. Save your API key. It is shown only once.
     After that, connect your first channel from the Channels menu or the Home
-    page (Email, SMS or Push). Every provider card links to that provider's
-    sign-in page. For SMS through their own service, they pick "Custom API
-    endpoint" (the default) and either paste a working curl command for it
-    and click "Fill in from curl", or give the URL and a sample JSON body
-    themselves. Each connected provider can also be turned on or off with a
-    click, without disconnecting it. Moving from an older install? Settings
-    has an "Import from an existing .env file" option. Their credentials are
-    typed into the browser and stored encrypted. They never come through this
-    chat.
+    page (Email, SMS, Push or Telegram). Every provider card links to that
+    provider's sign-in page. For SMS through their own service, they pick
+    "Custom API endpoint" (the default) and either paste a working curl command
+    for it and click "Fill in from curl", or give the URL and a sample JSON body
+    themselves. For Telegram, they message @BotFather in Telegram, send /newbot,
+    and paste the token it gives back - then click "Find chat IDs" on the
+    Telegram page to look up who to notify (Telegram bots can't message someone
+    who hasn't messaged the bot first). Each connected provider can also be
+    turned on or off with a click, without disconnecting it. Moving from an
+    older install? Settings has an "Import from an existing .env file" option.
+    Their credentials are typed into the browser and stored encrypted. They
+    never come through this chat.
 
 Then wait for the user to say they are done. If they ask which provider to pick:
 Pushover or ntfy for push (ntfy needs no account), Mailjet or SendGrid for email,
 Twilio, Infobip or Sinch for SMS if they want a hosted provider (Custom API
-endpoint if they already have their own SMS service).
+endpoint if they already have their own SMS service), or Telegram if they just
+want a free bot with no phone number or account beyond Telegram itself.
 
 ## 5. Connect to the gateway (optional, after setup)
 
@@ -115,7 +119,7 @@ guess a key yourself. The gateway's About page also has a short prompt they can
 paste into any other MCP-capable agent instead of that command.
 
 Once connected, the MCP tools work with the user's key: `send_push`,
-`send_email`, `send_sms`, `send_test`, `send_notification` (any channel);
+`send_email`, `send_sms`, `send_telegram`, `send_test`, `send_notification` (any channel);
 `list_providers`, `get_setup_status`, `get_setup_instructions`, `get_health`;
 `list_recent_messages`, `get_message`, `list_delivery_attempts` (that account's
 own messages only). The administrator's key also unlocks `check_provider_config`,

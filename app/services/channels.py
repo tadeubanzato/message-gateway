@@ -17,9 +17,10 @@ from app.services.email import get_email_provider
 from app.services.env import get_env
 from app.services.push import get_push_provider
 from app.services.sms import get_sms_provider
+from app.services.telegram import get_telegram_provider
 
-DEFAULT_PROVIDER = {"email": "mailjet", "sms": "custom_http", "push": "pushover"}
-CHANNEL_LABELS = {"email": "Email", "sms": "SMS", "push": "Push notifications"}
+DEFAULT_PROVIDER = {"email": "mailjet", "sms": "custom_http", "push": "pushover", "telegram": "bot_api"}
+CHANNEL_LABELS = {"email": "Email", "sms": "SMS", "push": "Push notifications", "telegram": "Telegram"}
 
 # Display text and badge color for each channel_status() state - defined once
 # here so home.html, channel.html and anything else showing a channel's status
@@ -164,6 +165,30 @@ CATALOG: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "telegram": {
+        "selector": "TELEGRAM_PROVIDER",
+        "getter": get_telegram_provider,
+        "providers": {
+            "bot_api": {
+                "label": "Telegram Bot",
+                "blurb": 'Send messages via a bot you create. Free, no phone number needed.',
+                "links": [
+                    {"label": "Open @BotFather", "url": "https://t.me/BotFather"},
+                    {"label": "Telegram Bot API docs", "url": "https://core.telegram.org/bots/api"},
+                ],
+                "help": (
+                    "In Telegram, open @BotFather and send /newbot. Follow the prompts to name your bot; "
+                    "BotFather replies with a token that looks like 123456789:AAH... - paste it below. "
+                    "Telegram bots can't message someone first: whoever should receive messages has to "
+                    "open your bot and send it anything (even just \"hi\") once. After that, save your "
+                    "token here and use Find chat IDs to look up theirs."
+                ),
+                "fields": [
+                    {"name": "TELEGRAM_BOT_TOKEN", "label": "Bot token", "secret": True, "placeholder": "123456789:AAH-your-bot-token"},
+                ],
+            },
+        },
+    },
 }
 
 
@@ -189,6 +214,20 @@ def safe_check(channel: str, provider_name: Optional[str] = None) -> dict[str, A
         return {"ok": False, "provider": None, "error": str(e)}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "provider": None, "error": f"Check failed ({type(e).__name__})."}
+
+
+def telegram_recent_chats() -> dict[str, Any]:
+    """Chat ids that have recently messaged the saved bot, for the "Find chat IDs" helper.
+    Requires a bot token to already be saved (Channels > Telegram)."""
+    from app.services.telegram.bot_api import recent_chats
+
+    token = get_env("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return {"ok": False, "error": "Save a bot token first."}
+    try:
+        return {"ok": True, "chats": recent_chats(token)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": friendly(str(e))}
 
 
 
@@ -295,11 +334,20 @@ CHANNEL_DEFAULTS: dict[str, list[dict[str, Any]]] = {
          "help": "Used when a message doesn't say who to text. Include the country code.",
          "placeholder": "+15551234567", "kind": "phone"},
     ],
+    "telegram": [
+        {"name": "TELEGRAM_DEFAULT_CHAT_ID", "label": "Default chat ID",
+         "help": "Used when a message doesn't say who to notify. Use Find chat IDs above to look yours up.",
+         "placeholder": "123456789"},
+    ],
 }
 
 
 def default_sms_number() -> Optional[str]:
     return (get_env("SMS_DEFAULT_TO") or "").strip() or None
+
+
+def default_telegram_chat_id() -> Optional[str]:
+    return (get_env("TELEGRAM_DEFAULT_CHAT_ID") or "").strip() or None
 
 
 def channel_defaults(channel: str) -> list[dict[str, Any]]:

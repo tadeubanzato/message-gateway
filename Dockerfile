@@ -11,8 +11,7 @@ ENV RABBITMQ_URL=amqp://guest:guest@127.0.0.1:5672/%2F \
     TEMPLATES_DIR=/app/app/templates \
     SMS_TEMPLATE_DIR=/app/app/templates/sms \
     EMAIL_TEMPLATE_DIR=/app/app/templates/email \
-    GATEWAY_BASE_URL=http://localhost:8010 \
-    PUBLIC_MCP_URL=http://localhost:8010/mcp
+    GATEWAY_BASE_URL=http://localhost:8010
 
 # RabbitMQ via Debian's own bookworm repo (not a third-party PPA) — deliberately
 # avoids depending on a third-party apt repo/signing-key URL that could go

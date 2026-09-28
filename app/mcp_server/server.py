@@ -48,10 +48,11 @@ mcp = FastMCP(
     name="message-gateway",
     streamable_http_path="/mcp",
     instructions=(
-        "Message Gateway sends email, SMS and push notifications through the providers its "
+        "Message Gateway sends email, SMS, push and Telegram messages through the providers its "
         "administrator connected. Map requests to tools like this: 'send a push notification' -> "
         "send_push; 'send an email' -> send_email; 'send / text an SMS to <number>' -> send_sms; "
-        "'send a test email/sms/push' -> send_test; anything else -> send_notification. Each send "
+        "'send a Telegram message' -> send_telegram; 'send a test email/sms/push' -> send_test; "
+        "anything else -> send_notification. Each send "
         "waits a few seconds and reports delivered or failed, so you can tell the user the outcome. "
         "Use list_providers to see what is connected (and pass provider= to choose one). If a "
         "channel isn't set up, tell the user the administrator must connect it in the web app. "
@@ -132,7 +133,7 @@ def _view(doc: dict[str, Any], include_content: bool) -> dict[str, Any]:
 def _channel(channel: str) -> str:
     c = (channel or "").strip().lower()
     if c not in channels.CATALOG:
-        raise _Denied(f"Unknown channel {channel!r}. Use email, sms or push.")
+        raise _Denied(f"Unknown channel {channel!r}. Use email, sms, push or telegram.")
     return c
 
 
@@ -157,8 +158,8 @@ async def send_notification(
     send_sms or send_test when they fit. The message is queued, then this waits a few
     seconds and reports 'delivered' or 'failed' with the reason.
 
-    channel: 'email', 'sms' or 'push'.
-    to: recipient (email address or phone number, or a list). Omit for push.
+    channel: 'email', 'sms', 'push' or 'telegram'.
+    to: recipient (email address, phone number, or Telegram chat id, or a list). Omit for push.
     subject: required for email; the title for push.
     body: message text. Required unless `template` is given.
     template: name of a server-side template to use instead of `body`.
@@ -290,6 +291,34 @@ async def send_sms(
 
 
 @tool()
+async def send_telegram(
+    ctx: Context,
+    body: str,
+    to: Union[str, list[str], None] = None,
+    provider: Optional[str] = None,
+    wait_seconds: int = 8,
+) -> dict:
+    """Send a Telegram message via a bot. Use this when the user says "send a Telegram
+    message", "message me on Telegram" and the like.
+
+    body: the message text.
+    to: a chat id (see list_providers -> telegram, or tell the user to use "Find chat IDs" in
+        the web app under Channels > Telegram). Leave it out to use the gateway's default chat
+        ID, if one is set. Telegram bots can't message someone who has never messaged the bot
+        first - if sending fails because there's no chat ID, tell the user to open their bot in
+        Telegram and send it any message once.
+    provider: which connected Telegram provider to use (default: the channel default).
+    wait_seconds: how long to wait for the delivery result (0 = don't wait).
+    """
+    recips = _recipients(to)
+    if recips is None:
+        if not channels.default_telegram_chat_id():
+            return {"ok": False, "error": "Say which chat ID to message, or ask the administrator to set a default chat ID in the web app (Channels > Telegram)."}
+        return await _send(ctx, wait_seconds, channel="telegram", body=body, provider=provider)  # API fills in the default
+    return await _send(ctx, wait_seconds, channel="telegram", to=recips, body=body, provider=provider)
+
+
+@tool()
 async def send_test(
     ctx: Context,
     channel: str = "push",
@@ -370,6 +399,7 @@ def get_setup_status(ctx: Context) -> dict:
                 "connected": [c["name"] for c in s["connected"]],
                 "setup_page": f"{GATEWAY_BASE_URL}/gateway/channels/{s['channel']}",
                 **({"default_phone_number_set": bool(channels.default_sms_number())} if s["channel"] == "sms" else {}),
+                **({"default_chat_id_set": bool(channels.default_telegram_chat_id())} if s["channel"] == "telegram" else {}),
             }
             for s in channels.all_status()
         },
@@ -429,7 +459,7 @@ def list_recent_messages(
 ) -> dict:
     """Your recent messages, newest first (only messages sent with your key's account).
 
-    channel: 'email', 'sms' or 'push'. status: 'queued', 'delivered' or 'failed'.
+    channel: 'email', 'sms', 'push' or 'telegram'. status: 'queued', 'delivered' or 'failed'.
     search: match recipient, subject, text or message id.
     include_content: also return subject and body (off by default to keep results small).
     """
