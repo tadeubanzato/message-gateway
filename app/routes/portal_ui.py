@@ -488,21 +488,28 @@ def settings_sso_test(request: Request, body: SsoBody):
 @router.post("/gateway/settings/sso", include_in_schema=False)
 def settings_sso_save(request: Request, body: SsoBody):
     account = _owner_or_error(request)
+    team, aud = cf_access.normalize_team(body.team), body.aud.strip()
+    if team and not cf_access.valid_team(team):
+        raise HTTPException(status_code=400, detail="The team domain must look like your-team.cloudflareaccess.com.")
+    # The details are always stored (encrypted, in the database) so they survive a reload,
+    # even before Cloudflare Access is switched on.
+    for key, value in ((cf_access.TEAM_KEY, team), (cf_access.AUD_KEY, aud)):
+        secret_store.set_setting(key, value) if value else secret_store.delete_setting(key)
+    secret_store.set_setting(cf_access.PASSWORD_KEY, "1" if body.password_login else "0")
     if not body.enabled:
         secret_store.set_setting(cf_access.ENABLED_KEY, "0")
-        return {"ok": True}
-    team, aud = cf_access.normalize_team(body.team), body.aud.strip()
-    if not cf_access.valid_team(team):
-        raise HTTPException(status_code=400, detail="The team domain must look like your-team.cloudflareaccess.com.")
-    if not aud:
-        raise HTTPException(status_code=400, detail="The Application Audience (AUD) tag is required.")
-    # Never let the administrator lock themselves out: turning on SSO, or turning off passwords,
-    # needs proof that Cloudflare Access already signs THIS administrator in.
-    email = _check_sso_request(request, team, aud)
-    if email != str(account.get("email") or "").strip().lower():
-        raise HTTPException(status_code=400, detail=f"Cloudflare Access signed you in as {email}, which is not the administrator's email ({account.get('email')}).")
-    secret_store.set_settings({
-        cf_access.ENABLED_KEY: "1", cf_access.TEAM_KEY: team, cf_access.AUD_KEY: aud,
-        cf_access.PASSWORD_KEY: "1" if body.password_login else "0",
-    })
-    return {"ok": True, "team": team}
+        return {"ok": True, "enabled": False}
+    if not team or not aud:
+        secret_store.set_setting(cf_access.ENABLED_KEY, "0")
+        raise HTTPException(status_code=400, detail="Saved, but not turned on: the team domain and AUD tag are both required.")
+    # Never let the administrator lock themselves out: turning SSO on needs proof that Cloudflare
+    # Access already signs THIS administrator in.
+    try:
+        email = _check_sso_request(request, team, aud)
+        if email != str(account.get("email") or "").strip().lower():
+            raise HTTPException(status_code=400, detail=f"Cloudflare Access signed you in as {email}, which is not the administrator's email ({account.get('email')}).")
+    except HTTPException as e:
+        secret_store.set_setting(cf_access.ENABLED_KEY, "0")
+        raise HTTPException(status_code=400, detail=f"Details saved, but Cloudflare Access is not turned on yet: {e.detail}")
+    secret_store.set_setting(cf_access.ENABLED_KEY, "1")
+    return {"ok": True, "enabled": True, "team": team}
