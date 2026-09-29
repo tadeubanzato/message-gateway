@@ -26,6 +26,7 @@ from typing import Any, Optional, Union
 
 import pika
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from app.auth import authenticate
 from app.broker import (
@@ -44,9 +45,27 @@ GATEWAY_BASE_URL = (os.environ.get("GATEWAY_BASE_URL") or "http://localhost:8010
 MAX_LIST = 100
 MAX_CONTENT_CHARS = 2000
 
+
+def _transport_security() -> TransportSecuritySettings:
+    """FastMCP silently rejects any Host header but localhost (HTTP 421 "Invalid Host
+    header") unless told otherwise, so a gateway reached as okame.local or by LAN IP could
+    never be connected to. /mcp already requires the API key and token, so the Host check
+    is off by default. Set MCP_ALLOWED_HOSTS (comma-separated, e.g. "okame.local:*") to
+    turn it back on for just those hosts."""
+    hosts = [h.strip() for h in (os.environ.get("MCP_ALLOWED_HOSTS") or "").split(",") if h.strip()]
+    if not hosts:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=[f"{scheme}://{h}" for h in hosts for scheme in ("http", "https")],
+    )
+
+
 mcp = FastMCP(
     name="message-gateway",
     streamable_http_path="/mcp",
+    transport_security=_transport_security(),
     instructions=(
         "Message Gateway sends email, SMS, push, Telegram and WhatsApp messages through the providers "
         "its administrator connected. Map requests to tools like this: 'send a push notification' -> "

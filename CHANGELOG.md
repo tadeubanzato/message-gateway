@@ -62,6 +62,10 @@ project uses [Semantic Versioning](https://semver.org/).
 - Renamed to "Message Gateway".
 
 ### Fixed
+- MCP requests to any hostname other than `localhost`/`127.0.0.1` (e.g. `okame.local`, a LAN
+  IP, a tunnel) got `421 Invalid Host header` and could never connect - FastMCP's DNS-rebinding
+  check was on by default. Off by default now (`/mcp` already requires the API key and token);
+  set `MCP_ALLOWED_HOSTS` to turn it back on for specific hosts.
 - RabbitMQ failed to start on a fresh volume (permissions on `/data/rabbitmq`).
 - `get_queue_status` returned 404 for every queue (double-encoded vhost).
 - The SQLite 90-day message cleanup was never scheduled; it now runs hourly.

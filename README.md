@@ -305,7 +305,13 @@ claude mcp add --transport http message-gateway http://localhost:8010/mcp \
 (Use your gateway's real address here - a server IP, a domain, a tunnel - not `localhost`, unless
 that's genuinely where you're running it. The **About** page in the web app always shows yours
 correctly, plus a short prompt you can paste into any MCP-capable agent instead of the command
-above.)
+above. Any hostname works out of the box; see `MCP_ALLOWED_HOSTS` in `.env.example` if you'd
+rather lock `/mcp` down to specific hosts.)
+
+Add it in the folder you'll actually be working in when you talk to your agent - MCP servers are
+scoped per-project. If a project's `/mcp` list doesn't show `message-gateway`, that's why: run the
+command above again from that folder (or `-s user` for every project). A server named something
+else, like `okame`, is a different MCP server entirely, not this gateway.
 
 Then just ask, for example:
 
