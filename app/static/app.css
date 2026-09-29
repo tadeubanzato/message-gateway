@@ -129,6 +129,8 @@ dialog::backdrop { background:rgba(0,0,0,.45); }
 
 /* marks messages sent with "Send test" */
 .badge.test { color:var(--muted); background:transparent; border:1px solid var(--line); font-weight:600; font-size:11px; letter-spacing:.3px; text-transform:uppercase; margin-left:6px; vertical-align:middle; }
+/* same shape as .test, its own color - a message can be both (an MCP-sent test) */
+.badge.mcp { color:var(--link); background:transparent; border:1px solid var(--link); font-weight:600; font-size:11px; letter-spacing:.3px; text-transform:uppercase; margin-left:6px; vertical-align:middle; }
 
 /* the tail of a saved credential, for comparing with the provider's dashboard */
 .tail { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; margin-left:8px; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px; letter-spacing:.3px; }

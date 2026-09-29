@@ -131,13 +131,27 @@ setup and the 24-hour-window limitation.
 
 ## 5. Connect to the gateway (optional, after setup)
 
-The last setup screen shows a `claude mcp add ...` command that contains the
-user's own API key (using their real address - not `localhost`, unless that's
-genuinely where the gateway runs). Tell the user to copy it from that screen and
-run it in their own terminal, then restart Claude Code (or run `/mcp`). Do NOT
-ask them to paste the key or token into this chat, and do not try to create or
-guess a key yourself. The gateway's About page also has a short prompt they can
-paste into any other MCP-capable agent instead of that command.
+If you are Claude Code (the `claude` CLI is on PATH), you can connect it yourself,
+with no key ever touching this chat: once the user says they've created the
+account, GET `<the address you gave the user>/setup/mcp-command` (add header
+`X-Setup-Token: <the token from the #token=... link>` on a headless install; none
+needed on a plain localhost one). A 200 response looks like
+`{"ok": true, "url": "...", "headers": {"X-User-Key": "...", "X-API-Token": "..."}}`
+- run `claude mcp add --transport http message-gateway <url> --header "X-User-Key:
+<...>" --header "X-API-Token: <...>"` with those exact values (a Bash tool call, not
+chat text), then tell the user it's connected and to run `/mcp` to confirm. It
+works once: a 404 means it was already claimed (by an earlier run, or someone else
+connecting from the Keys page) or more than 10 minutes have passed - fall back to
+the manual step below rather than retrying or asking the user to paste anything.
+
+Manual step (any other agent, or if the above returned 404): the last setup screen
+shows a `claude mcp add ...` command that contains the user's own API key (using
+their real address - not `localhost`, unless that's genuinely where the gateway
+runs). Tell the user to copy it from that screen and run it in their own terminal,
+then restart Claude Code (or run `/mcp`). Do NOT ask them to paste the key or token
+into this chat, and do not try to create or guess a key yourself. The gateway's
+About page also has a short prompt they can paste into any other MCP-capable agent
+instead of that command.
 
 Once connected, the MCP tools work with the user's key: `send_push`,
 `send_email`, `send_sms`, `send_telegram`, `send_whatsapp`, `send_test`,

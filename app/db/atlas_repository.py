@@ -291,6 +291,13 @@ class AtlasRepository(Repository):
         except Exception:
             return False
 
+    def mongo_database(self):
+        """The underlying pymongo Database handle. Not part of the Repository
+        interface (only meaningful on this backend) - used by the admin-only MCP
+        query_database tool, which allowlists collections and read-only queries
+        itself rather than trusting every caller of this method."""
+        return self._db
+
 
 def test_connection(uri: str, db_name: str) -> tuple[bool, str]:
     """Try to reach an Atlas cluster with the given URI. Returns (ok, message).

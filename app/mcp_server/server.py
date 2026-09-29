@@ -23,10 +23,13 @@ import json
 import os
 import re
 from typing import Any, Optional, Union
+from urllib.parse import urlsplit
 
 import pika
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
+from app import bootstrap
 from app.auth import authenticate
 from app.broker import (
     QUEUE_NAMES,
@@ -44,9 +47,27 @@ GATEWAY_BASE_URL = (os.environ.get("GATEWAY_BASE_URL") or "http://localhost:8010
 MAX_LIST = 100
 MAX_CONTENT_CHARS = 2000
 
+
+def _transport_security() -> TransportSecuritySettings:
+    """FastMCP silently rejects any Host header but localhost (HTTP 421 "Invalid Host
+    header") unless told otherwise, so a gateway reached as okame.local or by LAN IP could
+    never be connected to. /mcp already requires the API key and token, so the Host check
+    is off by default. Set MCP_ALLOWED_HOSTS (comma-separated, e.g. "okame.local:*") to
+    turn it back on for just those hosts."""
+    hosts = [h.strip() for h in (os.environ.get("MCP_ALLOWED_HOSTS") or "").split(",") if h.strip()]
+    if not hosts:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=[f"{scheme}://{h}" for h in hosts for scheme in ("http", "https")],
+    )
+
+
 mcp = FastMCP(
     name="message-gateway",
     streamable_http_path="/mcp",
+    transport_security=_transport_security(),
     instructions=(
         "Message Gateway sends email, SMS, push, Telegram and WhatsApp messages through the providers "
         "its administrator connected. Map requests to tools like this: 'send a push notification' -> "
@@ -54,8 +75,14 @@ mcp = FastMCP(
         "'send a Telegram message' -> send_telegram; 'send a WhatsApp message' -> send_whatsapp; "
         "'send a test email/sms/push' -> send_test; anything else -> send_notification. Each send "
         "waits a few seconds and reports delivered or failed, so you can tell the user the outcome. "
-        "Use list_providers to see what is connected (and pass provider= to choose one). If a "
-        "channel isn't set up, tell the user the administrator must connect it in the web app. "
+        "Use list_providers to see what is connected (and pass provider= to choose one) - check it "
+        "before offering channel choices, so you only offer channels that are actually set up. If a "
+        "channel isn't set up (list_providers -> that channel's state is 'not_set_up' or "
+        "'needs_attention', or a send fails with a setup_page in the result), offer to open that "
+        "setup_page URL in the user's browser right away (e.g. `open <url>` on macOS, `xdg-open "
+        "<url>` on Linux) so they can connect it, rather than just telling them the administrator "
+        "must connect it - unless you're running on a different machine than the one they're "
+        "browsing from, in which case just give them the address. "
         "A send can also fail with 'X is turned off on the gateway': that provider is connected but "
         "an administrator switched it off (Channels > that channel > that provider's card) - tell the "
         "user which provider and that they (or the administrator) can turn it back on there, or pick a "
@@ -211,11 +238,15 @@ async def _send(ctx: Context, wait_seconds: int, **fields: Any) -> dict:
     except ValueError as e:
         msg = "; ".join(x.get("msg", "").removeprefix("Value error, ") for x in e.errors()) if hasattr(e, "errors") else str(e)
         return {"ok": False, "error": msg}
-    out = await asyncio.to_thread(dispatch.send_and_wait, req, ident["account_id"], wait_seconds)
+    out = await asyncio.to_thread(dispatch.send_and_wait, req, ident["account_id"], wait_seconds, source="mcp")
     code = out.pop("status_code", None)
     if not out.get("ok") and code == 409 and channel in channels.CATALOG:
         out["setup_page"] = f"{GATEWAY_BASE_URL}/gateway/channels/{channel}"
-        out["hint"] = f"The administrator can connect a {channel} provider at the setup_page URL."
+        out["hint"] = (
+            f"No {channel} provider is connected yet. Offer to open the setup_page URL in the "
+            "user's browser now (e.g. `open <url>` / `xdg-open <url>`) so they can connect one, "
+            "unless you're running on a different machine than the one they're browsing from."
+        )
     if out.get("status") == "failed":
         out["hint"] = "Use get_message for the full delivery attempts."
     return out
@@ -397,36 +428,68 @@ async def send_test(
 # ---------------------------------------------------------------------
 @tool()
 def list_providers(ctx: Context, channel: Optional[str] = None) -> dict:
-    """Which providers you can send with. For each channel: the default provider, the
-    connected providers you can pass as `provider` to send_notification, and every
-    provider the gateway supports."""
+    """Which channels you can send on right now, and which still need setup. For each
+    channel: its state, the default provider, the connected providers you can pass as
+    `provider` to send_notification, and every provider the gateway supports. Use this
+    before offering channel choices for a send, so you only offer what's actually set up.
+
+    If a channel's state is 'not_set_up' or 'needs_attention', it has a `setup_page`
+    URL - offer to open that in the user's browser (e.g. `open <url>` on macOS,
+    `xdg-open` on Linux, `start` on Windows) rather than just naming the address,
+    unless you're running on a different machine than the one they're browsing from."""
     _who(ctx)
     chans = [_channel(channel)] if channel else list(channels.CATALOG)
-    out = {
-        ch: {
+    out = {}
+    for ch in chans:
+        state = channels.channel_status(ch)["state"]
+        entry = {
+            "state": state,
             "default": channels.default_provider(ch),
             "connected": channels.connected_providers(ch),
             "supported": list(channels.CATALOG[ch]["providers"]),
         }
-        for ch in chans
-    }
+        if state in ("not_set_up", "needs_attention"):
+            entry["setup_page"] = f"{GATEWAY_BASE_URL}/gateway/channels/{ch}"
+        out[ch] = entry
     if "push" in out:
         out["push"]["pushover_apps"] = [a["name"] for a in channels.pushover_apps() if a["set"]]
     return {"ok": True, "channels": out}
 
 
+def _database_details() -> dict[str, Any]:
+    """Which backend is active and where it points, no credentials. Read fresh every
+    call - db_backend/mongodb_uri live in bootstrap.json (mtime-checked, see
+    app.bootstrap) and settings go through a 5s cache that's invalidated on write, so
+    a backend switch or a provider change made in the web app shows up immediately,
+    not just after a restart."""
+    backend = backend_name()
+    if backend == "atlas":
+        uri = bootstrap.get("mongodb_uri") or ""
+        parsed = urlsplit(uri)
+        return {"backend": "mongodb", "host": parsed.hostname, "database": bootstrap.get("mongodb_db")}
+    path = os.environ.get("SQLITE_PATH", "/app/data/gateway.db").strip() or "/app/data/gateway.db"
+    try:
+        size_bytes = os.path.getsize(path)
+    except OSError:
+        size_bytes = None
+    return {"backend": "sqlite", "path": path, "size_bytes": size_bytes}
+
+
 @tool()
 def get_setup_status(ctx: Context) -> dict:
-    """Overall state of the gateway: database, and per channel whether it is ready
-    (default provider connected), needs attention, or is not set up. Offline check:
-    it does not call the providers (administrators can use check_provider_config)."""
+    """Overall state of the gateway: database (backend, and mongodb/sqlite details),
+    and per channel whether it is ready (default provider connected), needs attention,
+    or is not set up. Always computed fresh - never cached - so it reflects whatever
+    was just changed in the web app. Offline check: it does not call the providers
+    (administrators can use check_provider_config)."""
     _who(ctx)
     try:
         db_ok = get_repository().ping()
     except Exception:
         db_ok = False
     return {
-        "ok": True, "db_backend": backend_name(), "db_ok": db_ok, "web_app": f"{GATEWAY_BASE_URL}/gateway",
+        "ok": True, "db_backend": backend_name(), "db_ok": db_ok, "database": _database_details(),
+        "web_app": f"{GATEWAY_BASE_URL}/gateway",
         "credentials_unreadable": secret_store.unreadable_count(),
         "channels": {
             s["channel"]: {
@@ -671,3 +734,102 @@ def retry_dead_letter(ctx: Context, channel: str, message_id: str) -> dict:
     finally:
         if conn is not None:
             conn.close()
+
+
+RABBITMQ_LOG_BASE = os.environ.get("RABBITMQ_LOG_BASE", "/data/rabbitmq/log").strip() or "/data/rabbitmq/log"
+
+
+@tool()
+def get_broker_log(ctx: Context, lines: int = 200) -> dict:
+    """ADMIN ONLY. Tail RabbitMQ's own log file - broker-level history (startup,
+    crashes, disk/memory alarms, refused connections) that get_health and
+    get_queue_status can't show, since they only report current up/down and queue
+    depth. RabbitMQ itself has no message history to query - once a worker consumes
+    and acks a message it's gone from the broker for good; that history lives in the
+    message log instead (list_recent_messages, get_message, list_delivery_attempts).
+
+    lines: how many lines to return from the end of the log (capped at 1000)."""
+    _admin(ctx)
+    lines = max(1, min(int(lines), 1000))
+    try:
+        names = [f for f in os.listdir(RABBITMQ_LOG_BASE) if f.endswith(".log")]
+    except OSError as e:
+        return {"ok": False, "error": f"Can't read {RABBITMQ_LOG_BASE!r}: {e}."}
+    if not names:
+        return {"ok": False, "error": f"No .log files in {RABBITMQ_LOG_BASE!r} yet."}
+    names.sort(key=lambda f: os.path.getmtime(os.path.join(RABBITMQ_LOG_BASE, f)), reverse=True)
+    path = os.path.join(RABBITMQ_LOG_BASE, names[0])
+    with open(path, "r", errors="replace") as f:
+        tail = f.readlines()[-lines:]
+    return {"ok": True, "file": names[0], "lines": len(tail), "log": "".join(tail)}
+
+
+_QUERYABLE_COLLECTIONS = {"messages", "attempts"}
+_JS_OPERATORS = {"$where", "$function", "$accumulator"}
+
+
+def _has_js_operator(value: Any) -> bool:
+    """Recursively reject Mongo operators that run server-side JS - this tool is a
+    read-only inspection shortcut, not a way to execute code in the database."""
+    if isinstance(value, dict):
+        return any(k in _JS_OPERATORS or _has_js_operator(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_has_js_operator(v) for v in value)
+    return False
+
+
+@tool()
+def query_database(ctx: Context, collection: str, filter: Optional[dict] = None,
+                   projection: Optional[list[str]] = None, sort: Optional[list[list]] = None,
+                   limit: int = 25) -> dict:
+    """ADMIN ONLY. MongoDB (atlas) backend only. A raw, read-only Mongo query against
+    the gateway's own message log, for troubleshooting beyond what list_recent_messages
+    / get_message cover - compound filters, date ranges, cross-account look-ups. On the
+    sqlite backend this returns an error; use list_recent_messages / get_message there
+    instead - same data, no query language needed for a database this size.
+
+    collection: 'messages' or 'attempts' (delivery attempts). No other collection is
+        exposed here - accounts, settings and provider credentials never are, even to
+        an administrator, through this tool.
+    filter: a MongoDB filter document, e.g. {"status": "failed", "channel": "sms"}.
+        Operators that run server-side code ($where, $function, $accumulator) are
+        rejected.
+    projection: field names to return (default: everything except encrypted content).
+    sort: e.g. [["created_at", -1]].
+    limit: capped at 100.
+    """
+    _admin(ctx)
+    if backend_name() != "atlas":
+        return {"ok": False, "error": "query_database needs the MongoDB (atlas) backend. This gateway "
+                "is on sqlite - use list_recent_messages / get_message instead."}
+    coll = (collection or "").strip().lower()
+    if coll not in _QUERYABLE_COLLECTIONS:
+        return {"ok": False, "error": f"Unknown or unavailable collection {collection!r}. "
+                f"Available: {sorted(_QUERYABLE_COLLECTIONS)}."}
+    flt = filter or {}
+    if _has_js_operator(flt):
+        return {"ok": False, "error": "Operators that run server-side code ($where, $function, "
+                "$accumulator) aren't allowed."}
+    limit = max(1, min(int(limit), 100))
+
+    from app.db.atlas_repository import AtlasRepository
+
+    repo = get_repository()
+    if not isinstance(repo, AtlasRepository):
+        return {"ok": False, "error": "Not connected to MongoDB."}
+    mongo_db = repo.mongo_database()
+
+    proj = None
+    if projection:
+        proj = {f: 1 for f in projection}
+        proj["_id"] = 1
+    cursor = mongo_db[coll].find(flt, proj, limit=limit, max_time_ms=5000)
+    if sort:
+        cursor = cursor.sort([(f, d) for f, d in sort])
+    docs = []
+    for d in cursor:
+        d["_id"] = str(d.get("_id"))
+        for k in [k for k in d if k.endswith("_enc")]:
+            d.pop(k, None)  # message content stays encrypted - never decrypted for this tool
+        docs.append(d)
+    return {"ok": True, "collection": coll, "count": len(docs), "documents": docs}

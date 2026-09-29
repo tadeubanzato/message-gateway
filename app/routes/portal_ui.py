@@ -355,7 +355,7 @@ def channel_test(request: Request, channel: str, body: TestBody):
         req = dispatch.build_test_request(channel, to, body.provider, body.app)
     except ValueError as e:
         return {"ok": False, "error": str(e)}
-    result = dispatch.send_and_wait(req, str(account["_id"]), wait_seconds=10)
+    result = dispatch.send_and_wait(req, str(account["_id"]), wait_seconds=10, source="portal")
     if result.get("status") == "queued":
         return {"ok": True, "note": "Sent. It is still being delivered; check the message log."}
     return {"ok": bool(result.get("ok")), "error": channels.friendly(result.get("error")) if not result.get("ok") else None}
