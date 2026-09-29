@@ -41,7 +41,8 @@ You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (runn
 Paste this into Claude Code, Codex CLI or any agent with shell access:
 
 ```bash
-Please install the message gateway. Instructions are at https://github.com/tadeubanzato/message-gateway/blob/main/llms.txt.
+Please install the message gateway.
+Instructions are at https://github.com/tadeubanzato/message-gateway/blob/main/llms.txt.
 Fetch that file and follow it.
 ```
 
