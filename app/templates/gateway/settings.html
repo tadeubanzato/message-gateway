@@ -40,7 +40,7 @@
   </label>
   <div class="row"><button class="btn ghost" id="ssoTest">Test</button><button class="btn" id="ssoSave">Save</button></div>
   <div id="ssoout"></div>
-  <p class="help">Save and Test only work from the protected address (behind Cloudflare Access), because they check the sign-in Cloudflare just gave you.</p>
+  <p class="help">Your details are stored in the database when you click Save. Switching sign-in on, and Test, only work from the protected address (behind Cloudflare Access), because they check the sign-in Cloudflare just gave you.</p>
 </div>
 
 <div class="card">
@@ -139,7 +139,7 @@
         .catch(function (e) { window.MG.say(out, e.message, "err"); }).then(function () { btn.disabled = false; });
     }
     $("ssoTest").onclick = function (ev) { run(ev.target, "/gateway/settings/sso/test", function (r) { return "Works. Cloudflare Access signed you in as " + r.email + "."; }); };
-    $("ssoSave").onclick = function (ev) { run(ev.target, "/gateway/settings/sso", function () { return "Saved."; }); };
+    $("ssoSave").onclick = function (ev) { run(ev.target, "/gateway/settings/sso", function (r) { return r.enabled ? "Saved. Cloudflare Access sign-in is on." : "Saved."; }); };
   })();
 
   document.getElementById("envfile").onchange = function (e) {
