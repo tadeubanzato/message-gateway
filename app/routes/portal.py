@@ -190,7 +190,7 @@ def _get_active_apps(account: dict[str, Any]) -> Dict[str, dict[str, Any]]:
 def login_page(request: Request):
     if not access.has_accounts():
         return _redirect("/setup")  # fresh install: create the administrator in setup first
-    email = cf_access.verified_email(request.headers.get(cf_access.JWT_HEADER))
+    email, why_not = cf_access.check_request(request.headers.get(cf_access.JWT_HEADER))
     if email:
         account = _repo().find_account_by_email(email)
         if account:
@@ -202,7 +202,7 @@ def login_page(request: Request):
             _login_ctx(request, error=f"Cloudflare Access signed you in as {email}, but this gateway has no account for that email. Ask the administrator to add one."),
             status_code=403,
         )
-    return templates.TemplateResponse("gateway/login.html", _login_ctx(request))
+    return templates.TemplateResponse("gateway/login.html", _login_ctx(request, sso_why_not=why_not))
 
 
 @router.post("/gateway/login")

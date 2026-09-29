@@ -383,7 +383,7 @@ def settings_page(request: Request):
         public_base_url_override=(secret_store.get_setting("PUBLIC_BASE_URL") or "").strip(),
         public_base_url_env_locked=bool((os.environ.get("PUBLIC_BASE_URL") or "").strip()),
         detected_base_url=str(request.base_url).rstrip("/"),
-        sso=cf_access.settings(),
+        sso=cf_access.settings(), aud_last4=channels.mask_tail(cf_access.settings()["aud"]),
     ))
 
 
@@ -480,15 +480,17 @@ def settings_sso_test(request: Request, body: SsoBody):
     team = cf_access.normalize_team(body.team)
     if not cf_access.valid_team(team):
         raise HTTPException(status_code=400, detail="The team domain must look like your-team.cloudflareaccess.com.")
-    if not body.aud.strip():
+    aud = body.aud.strip() or cf_access.settings()["aud"]  # blank = keep the saved one
+    if not aud:
         raise HTTPException(status_code=400, detail="The Application Audience (AUD) tag is required.")
-    return {"ok": True, "email": _check_sso_request(request, team, body.aud.strip())}
+    return {"ok": True, "email": _check_sso_request(request, team, aud)}
 
 
 @router.post("/gateway/settings/sso", include_in_schema=False)
 def settings_sso_save(request: Request, body: SsoBody):
     account = _owner_or_error(request)
-    team, aud = cf_access.normalize_team(body.team), body.aud.strip()
+    # The AUD tag is never sent back to the browser; leaving the box blank keeps the saved one.
+    team, aud = cf_access.normalize_team(body.team), body.aud.strip() or cf_access.settings()["aud"]
     if team and not cf_access.valid_team(team):
         raise HTTPException(status_code=400, detail="The team domain must look like your-team.cloudflareaccess.com.")
     # The details are always stored (encrypted, in the database) so they survive a reload,

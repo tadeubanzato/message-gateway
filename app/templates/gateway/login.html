@@ -7,7 +7,7 @@
   <p class="sub">Log in to manage your channels, keys and messages.</p>
   <div class="card">
     {% if error %}<div class="msg err" style="margin-top:0">{{ error }}</div>{% endif %}
-    {% if sso_active and not error %}<div class="msg" style="margin-top:0">Single sign-on is on, but Cloudflare Access didn't sign you in. Reload this page to sign in with Cloudflare.</div>{% endif %}
+    {% if sso_active and not error %}<div class="msg" style="margin-top:0">Single sign-on is on, but Cloudflare Access didn't sign you in{% if sso_why_not %}: {{ sso_why_not }}{% else %}.{% endif %}</div>{% endif %}
     {% if password_login %}
     <form method="post" action="/gateway/login" autocomplete="on">
       <label for="email">Email</label>
