@@ -295,7 +295,9 @@ a clear error instead of queueing a message that can't be delivered.
 The MCP server lets an AI agent send messages, check delivery, and help troubleshoot. It uses
 the **same key and token** as the API, so connecting is one command. The last setup screen (and
 every new key) shows it ready to copy. Run it **in your own terminal** (it contains your token),
-then restart Claude Code or run `/mcp`:
+then restart Claude Code or run `/mcp`. If you installed with an agent following `llms.txt`
+(Claude Code, e.g.), it likely already ran this for you right after you created your account -
+`/mcp` there is just to confirm.
 
 ```bash
 claude mcp add --transport http message-gateway http://localhost:8010/mcp \

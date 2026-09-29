@@ -65,6 +65,11 @@ project uses [Semantic Versioning](https://semver.org/).
   log's job). `query_database` runs a raw read-only Mongo query against the `messages`/`attempts`
   collections on the Atlas backend, for filters the other tools don't cover; on SQLite it points
   back to `list_recent_messages`/`get_message`.
+- `GET /setup/mcp-command`: a one-time, in-memory-only handoff of the MCP connection info for the
+  account `/setup/admin` just created, so `llms.txt` installs (Claude Code, e.g.) can run
+  `claude mcp add` automatically right after the browser step, with no copy-paste and the key
+  never touching a file or the chat. Works once, expires after 10 minutes unclaimed; the manual
+  copy-from-the-Keys-page flow still works exactly as before as a fallback.
 
 ### Changed
 - `.env` is now optional and only for advanced overrides; every variable in
