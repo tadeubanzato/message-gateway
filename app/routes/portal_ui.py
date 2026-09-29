@@ -19,7 +19,7 @@ from app.routes.portal import (
     _get_active_apps, _iso, _redirect, _require_account_or_redirect,
     _load_account_from_session, page_ctx, templates,
 )
-from app.services import access, channels, db_switch, dispatch, message_log, secret_store
+from app.services import access, cf_access, channels, db_switch, dispatch, message_log, secret_store
 from app.services.phone import normalize_phone
 from app.services.auth_passwords import hash_password, verify_password
 from app.version import APP_VERSION
@@ -383,6 +383,7 @@ def settings_page(request: Request):
         public_base_url_override=(secret_store.get_setting("PUBLIC_BASE_URL") or "").strip(),
         public_base_url_env_locked=bool((os.environ.get("PUBLIC_BASE_URL") or "").strip()),
         detected_base_url=str(request.base_url).rstrip("/"),
+        sso=cf_access.settings(),
     ))
 
 
@@ -448,3 +449,60 @@ def settings_public_base_url(request: Request, body: PublicBaseUrlBody):
     else:
         secret_store.delete_setting("PUBLIC_BASE_URL")
     return {"ok": True, "url": url}
+
+
+# ---------------------------------------------------------------------
+# Settings: single sign-on with Cloudflare Access (Zero Trust), portal only
+# ---------------------------------------------------------------------
+class SsoBody(BaseModel):
+    enabled: bool
+    team: str = ""
+    aud: str = ""
+    password_login: bool = True
+
+
+def _check_sso_request(request: Request, team: str, aud: str) -> str:
+    """Verify the Cloudflare Access token on THIS request; return the email it proves."""
+    token = request.headers.get(cf_access.JWT_HEADER)
+    if not token:
+        raise HTTPException(status_code=400, detail=(
+            "This request didn't come through Cloudflare Access (no token). Put the portal behind an Access "
+            "application for /gateway first, then reload this page from the protected address."))
+    try:
+        return str(cf_access.verify(token, team, aud).get("email") or "").strip().lower()
+    except cf_access.AccessError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/gateway/settings/sso/test", include_in_schema=False)
+def settings_sso_test(request: Request, body: SsoBody):
+    _owner_or_error(request)
+    team = cf_access.normalize_team(body.team)
+    if not cf_access.valid_team(team):
+        raise HTTPException(status_code=400, detail="The team domain must look like your-team.cloudflareaccess.com.")
+    if not body.aud.strip():
+        raise HTTPException(status_code=400, detail="The Application Audience (AUD) tag is required.")
+    return {"ok": True, "email": _check_sso_request(request, team, body.aud.strip())}
+
+
+@router.post("/gateway/settings/sso", include_in_schema=False)
+def settings_sso_save(request: Request, body: SsoBody):
+    account = _owner_or_error(request)
+    if not body.enabled:
+        secret_store.set_setting(cf_access.ENABLED_KEY, "0")
+        return {"ok": True}
+    team, aud = cf_access.normalize_team(body.team), body.aud.strip()
+    if not cf_access.valid_team(team):
+        raise HTTPException(status_code=400, detail="The team domain must look like your-team.cloudflareaccess.com.")
+    if not aud:
+        raise HTTPException(status_code=400, detail="The Application Audience (AUD) tag is required.")
+    # Never let the administrator lock themselves out: turning on SSO, or turning off passwords,
+    # needs proof that Cloudflare Access already signs THIS administrator in.
+    email = _check_sso_request(request, team, aud)
+    if email != str(account.get("email") or "").strip().lower():
+        raise HTTPException(status_code=400, detail=f"Cloudflare Access signed you in as {email}, which is not the administrator's email ({account.get('email')}).")
+    secret_store.set_settings({
+        cf_access.ENABLED_KEY: "1", cf_access.TEAM_KEY: team, cf_access.AUD_KEY: aud,
+        cf_access.PASSWORD_KEY: "1" if body.password_login else "0",
+    })
+    return {"ok": True, "team": team}

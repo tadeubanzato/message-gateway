@@ -19,6 +19,31 @@
 </div>
 
 <div class="card">
+  <h2>Single sign-on (Cloudflare Access)</h2>
+  <p class="muted" style="margin-top:0">
+    Optional. Let people sign in to this web portal with Cloudflare Zero Trust instead of typing a password. Create a
+    self-hosted Access application in Cloudflare for this gateway's address, covering the portal (<code>/gateway</code>)
+    only, so <code>/mcp</code> and <code>/api</code> keep working with their keys. Then paste its team domain and
+    Application Audience (AUD) tag here. Accounts are matched by email; nobody is created automatically.
+  </p>
+  <label class="row" style="color:var(--fg);font-size:14px;margin:0 0 10px;gap:10px;align-items:flex-start">
+    <input type="checkbox" id="ssoEnabled" style="width:auto;margin-top:4px" {{ 'checked' if sso.enabled }} />
+    <span><b>Sign in with Cloudflare Access</b></span>
+  </label>
+  <label for="ssoTeam">Team domain</label>
+  <input id="ssoTeam" value="{{ sso.team }}" placeholder="your-team.cloudflareaccess.com" autocomplete="off" style="max-width:420px" />
+  <label for="ssoAud">Application Audience (AUD) tag</label>
+  <input id="ssoAud" value="{{ sso.aud }}" placeholder="64-character tag from the Access application" autocomplete="off" style="max-width:420px" />
+  <label class="row" style="color:var(--fg);font-size:14px;margin:10px 0;gap:10px;align-items:flex-start">
+    <input type="checkbox" id="ssoPassword" style="width:auto;margin-top:4px" {{ 'checked' if sso.password_login }} />
+    <span><b>Keep email and password login</b><br /><span class="muted">Turn off to require Cloudflare Access for everyone. Keep it on until you've tried Access once.</span></span>
+  </label>
+  <div class="row"><button class="btn ghost" id="ssoTest">Test</button><button class="btn" id="ssoSave">Save</button></div>
+  <div id="ssoout"></div>
+  <p class="help">Save and Test only work from the protected address (behind Cloudflare Access), because they check the sign-in Cloudflare just gave you.</p>
+</div>
+
+<div class="card">
   <h2>Public address</h2>
   <p class="muted" style="margin-top:0">
     Shown to developers and AI agents on the <a href="/gateway/about">About</a> page (the API examples and the MCP
@@ -104,6 +129,18 @@
       .catch(function (e) { window.MG.say(out, e.message, "err"); })
       .then(function () { b.disabled = false; });
   };
+
+  (function () {
+    var out = document.getElementById("ssoout"), $ = function (id) { return document.getElementById(id); };
+    function body() { return { enabled: $("ssoEnabled").checked, team: $("ssoTeam").value, aud: $("ssoAud").value, password_login: $("ssoPassword").checked }; }
+    function run(btn, url, ok) {
+      btn.disabled = true;
+      window.MG.post(url, body()).then(function (r) { window.MG.say(out, ok(r), "ok"); })
+        .catch(function (e) { window.MG.say(out, e.message, "err"); }).then(function () { btn.disabled = false; });
+    }
+    $("ssoTest").onclick = function (ev) { run(ev.target, "/gateway/settings/sso/test", function (r) { return "Works. Cloudflare Access signed you in as " + r.email + "."; }); };
+    $("ssoSave").onclick = function (ev) { run(ev.target, "/gateway/settings/sso", function () { return "Saved."; }); };
+  })();
 
   document.getElementById("envfile").onchange = function (e) {
     var f = e.target.files[0]; if (!f) return;
