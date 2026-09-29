@@ -7,6 +7,8 @@
   <p class="sub">Log in to manage your channels, keys and messages.</p>
   <div class="card">
     {% if error %}<div class="msg err" style="margin-top:0">{{ error }}</div>{% endif %}
+    {% if sso_active and not error %}<div class="msg" style="margin-top:0">Single sign-on is on, but Cloudflare Access didn't sign you in. Reload this page to sign in with Cloudflare.</div>{% endif %}
+    {% if password_login %}
     <form method="post" action="/gateway/login" autocomplete="on">
       <label for="email">Email</label>
       <input id="email" name="email" type="email" value="{{ email or '' }}" placeholder="you@example.com" autocomplete="username" required />
@@ -17,6 +19,7 @@
         {% if signups_open %}<a href="/gateway/register" class="muted">Create an account</a>{% endif %}
       </div>
     </form>
+    {% endif %}
     {% if test_user_key_set %}
       <hr style="border:none;border-top:1px solid var(--line);margin:16px 0" />
       <div class="muted">Dev-only:</div>

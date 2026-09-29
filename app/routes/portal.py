@@ -26,7 +26,7 @@ from starlette.templating import Jinja2Templates
 from app import bootstrap
 from app.db import get_repository
 from app.db.base import DuplicateEmailError, DuplicateUserKeyError
-from app.services import access, message_log
+from app.services import access, cf_access, message_log
 from app.services.env import public_base_url
 from app.services.auth_passwords import hash_password, verify_password
 from app.services.auth_tokens import generate_raw_token, hmac_token_hash_hex, new_user_key, token_last4
@@ -67,7 +67,8 @@ def page_ctx(request: Request, account: dict[str, Any], active: str = "", **extr
 def _login_ctx(request: Request, **extra: Any) -> dict[str, Any]:
     return {
         "request": request, "test_user_key_set": bool(TEST_USER_KEY), "test_user_key": TEST_USER_KEY,
-        "signups_open": access.signups_open(), **extra,
+        "signups_open": access.signups_open(), "password_login": cf_access.password_login_allowed(),
+        "sso_active": cf_access.is_active(), **extra,
     }
 
 
@@ -189,11 +190,27 @@ def _get_active_apps(account: dict[str, Any]) -> Dict[str, dict[str, Any]]:
 def login_page(request: Request):
     if not access.has_accounts():
         return _redirect("/setup")  # fresh install: create the administrator in setup first
+    email = cf_access.verified_email(request.headers.get(cf_access.JWT_HEADER))
+    if email:
+        account = _repo().find_account_by_email(email)
+        if account:
+            resp = _redirect("/gateway")
+            _set_session_cookie(resp, _create_session(str(account["_id"])))
+            return resp
+        return templates.TemplateResponse(
+            "gateway/login.html",
+            _login_ctx(request, error=f"Cloudflare Access signed you in as {email}, but this gateway has no account for that email. Ask the administrator to add one."),
+            status_code=403,
+        )
     return templates.TemplateResponse("gateway/login.html", _login_ctx(request))
 
 
 @router.post("/gateway/login")
 async def login_submit(request: Request):
+    if not cf_access.password_login_allowed():
+        return templates.TemplateResponse(
+            "gateway/login.html", _login_ctx(request, error="Password login is turned off. Sign in with Cloudflare Access."), status_code=403,
+        )
     form = await request.form()
     email = str(form.get("email") or "").strip().lower()
     password = str(form.get("password") or "").strip()
@@ -242,7 +259,8 @@ def logout(request: Request):
     sid = (request.cookies.get(SESSION_COOKIE_NAME) or "").strip()
     if sid:
         _repo().delete_session(sid)
-    resp = _redirect("/gateway/login")
+    # With Cloudflare Access on, end its session too or the login page signs the person straight back in.
+    resp = _redirect("/cdn-cgi/access/logout" if cf_access.is_active() else "/gateway/login")
     _clear_session_cookie(resp)
     return resp
 
