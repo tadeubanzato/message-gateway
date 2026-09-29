@@ -355,9 +355,12 @@ def get_email_template_expected_context(template_name: str, auth: dict = Depends
     }
 
 
-def enqueue_message(req: MessageRequest, account_id: Optional[str]) -> MessageResponse:
+def enqueue_message(req: MessageRequest, account_id: Optional[str], source: str = "api") -> MessageResponse:
     """Validate a message request, log it and queue it for delivery. Shared by the
-    HTTP API and the MCP server. Raises HTTPException on invalid input."""
+    HTTP API, the web app's Send test button, and the MCP server. Raises HTTPException
+    on invalid input.
+
+    source: recorded on the message log - 'api', 'portal' or 'mcp' (see message_log.record_queued)."""
     input_was_list = isinstance(req.to, list)
     channel = req.channel
     recipients = req.to_list_deduped()
@@ -455,7 +458,7 @@ def enqueue_message(req: MessageRequest, account_id: Optional[str]) -> MessageRe
         req_one = req.model_copy(update=update_payload)
         msg = MessageEnqueued.from_request(req_one)
 
-        message_log.record_queued(msg, account_id, used_template)
+        message_log.record_queued(msg, account_id, used_template, source=source)
 
         publish_message(msg)
         message_ids.append(msg.message_id)

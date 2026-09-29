@@ -28,8 +28,13 @@ def store_content_enabled() -> bool:
     return (get_env("STORE_MESSAGE_CONTENT", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
 
 
-def record_queued(msg: Any, account_id: Optional[str] = None, template: Optional[str] = None) -> None:
-    """Create the log entry when a message is accepted. `msg` is a MessageEnqueued."""
+def record_queued(msg: Any, account_id: Optional[str] = None, template: Optional[str] = None,
+                  source: str = "api") -> None:
+    """Create the log entry when a message is accepted. `msg` is a MessageEnqueued.
+
+    source: how the send was requested - 'api' (HTTP API), 'mcp' (an AI agent) or 'portal'
+    (the web app's Send test button). Shown on the message log so an unexpected send is
+    easy to trace back to where it came from."""
     try:
         doc: dict[str, Any] = {
             "message_id": msg.message_id,
@@ -39,6 +44,7 @@ def record_queued(msg: Any, account_id: Optional[str] = None, template: Optional
             "to": msg.to,
             "queued_at": msg.created_at or _now_iso(),
             "template": template,
+            "source": source,
             "app": msg.app,
             "device": getattr(msg, "device", None),
             "provider": getattr(msg, "provider", None),

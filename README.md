@@ -327,15 +327,20 @@ Each send waits a few seconds and reports **delivered** or **failed** with the r
 numbers can be typed any way (`+1 (555) 123-4567`); a number without a country code is never
 guessed, the agent is told to ask for it. If the provider that would send it (named, or the
 channel's default) is turned off, the agent gets a clear "X is turned off on the gateway" reason
-instead - the same `403` the HTTP API returns.
+instead - the same `403` the HTTP API returns. If a channel isn't connected at all, `list_providers`
+and the send tools return a `setup_page` link for it, and the agent is told to offer opening it in
+your browser right there rather than just describing where to go. Every message sent this way is
+tagged `source: mcp` in the message log, shown as an **MCP** badge next to it.
 
 | Tool | Use |
 |---|---|
 | `send_push`, `send_email`, `send_sms`, `send_telegram`, `send_whatsapp`, `send_test` | The common sends. `send_test` with no address emails **you** |
 | `send_notification` | Any channel, templates, full control |
-| `list_providers`, `get_setup_status`, `get_setup_instructions`, `get_health` | See what's connected and where to set up the rest |
+| `list_providers`, `get_setup_status`, `get_setup_instructions`, `get_health` | See what's connected and where to set up the rest. `get_setup_status` also reports the database (backend, and its Mongo host/db or SQLite path and size) |
 | `list_recent_messages`, `get_message`, `list_delivery_attempts` | Your own messages and their delivery |
 | `check_provider_config`, `get_queue_status`, `list_dead_letters`, `retry_dead_letter` | **Administrator only** |
+| `get_broker_log` | **Administrator only.** Tail RabbitMQ's own log - broker-level history that `get_health`/`get_queue_status` don't show |
+| `query_database` | **Administrator only, MongoDB (atlas) backend only.** Raw read-only Mongo query against the `messages`/`attempts` collections for troubleshooting beyond the tools above. On SQLite, use `list_recent_messages`/`get_message` instead |
 
 Provider credentials are never handled through MCP: they are entered in the web app.
 

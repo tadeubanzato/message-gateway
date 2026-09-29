@@ -53,6 +53,18 @@ project uses [Semantic Versioning](https://semver.org/).
 - Saved credentials show their **last 4 characters** (`••••••••1a2b`) beside each field.
 - **Send test** goes through the real pipeline, so tests appear in the message log and
   Home, labelled **Test** (with a Hide tests filter).
+- Messages sent through MCP are tagged `source: mcp` and labelled **MCP** in the message log,
+  next to the existing **Test** label (an MCP-sent test carries both).
+- MCP: `get_setup_status` now reports the database too (backend, and its MongoDB host/database
+  or SQLite path/size - no credentials), always computed fresh. `list_providers` reports each
+  channel's state and, when it isn't connected, a `setup_page` link; the agent is told to offer
+  opening it in the user's browser instead of just describing where to go, and the same happens
+  when a send fails for a not-connected channel.
+- MCP, administrator-only: `get_broker_log` tails RabbitMQ's own log file for broker-level
+  troubleshooting (RabbitMQ itself keeps no history of consumed messages - that's the message
+  log's job). `query_database` runs a raw read-only Mongo query against the `messages`/`attempts`
+  collections on the Atlas backend, for filters the other tools don't cover; on SQLite it points
+  back to `list_recent_messages`/`get_message`.
 
 ### Changed
 - `.env` is now optional and only for advanced overrides; every variable in

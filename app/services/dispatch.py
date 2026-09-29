@@ -18,11 +18,12 @@ from app.db import get_repository
 from app.schemas import MessageRequest
 
 
-def send_and_wait(req: MessageRequest, account_id: Optional[str], wait_seconds: int = 8) -> dict[str, Any]:
+def send_and_wait(req: MessageRequest, account_id: Optional[str], wait_seconds: int = 8, *,
+                  source: str) -> dict[str, Any]:
     from app.main import enqueue_message  # local import: main imports the routes that use this module
 
     try:
-        resp = enqueue_message(req, account_id)
+        resp = enqueue_message(req, account_id, source=source)
     except HTTPException as e:
         detail = e.detail
         out: dict[str, Any] = {
