@@ -40,9 +40,9 @@ You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (runn
 
 Paste this into Claude Code, Codex CLI or any agent with shell access:
 
-> Please install the message gateway. Instructions are at
-> `https://github.com/tadeubanzato/message-gateway/blob/main/llms.txt`. Fetch that
-> file and follow it.
+```bash
+Please install the message gateway. Instructions are at https://github.com/tadeubanzato/message-gateway/blob/main/llms.txt. Fetch that file and follow it.
+```
 
 The agent downloads the project, installs it, and opens the setup page in your browser.
 (It needs an agent that can run shell commands; chat-only apps can't.)
