@@ -123,8 +123,9 @@ delivered in the background, with retries.
 { "status": "queued", "message_id": "6f1c2b0e-..." }
 ```
 
-**Several recipients.** `to` may be a list. Duplicates are removed and each recipient gets its own message, so the
-response has `message_ids` (one per recipient) and `to_deduped` instead of `message_id`.
+**Several recipients.** `to` may be a list, or one string with the recipients separated by commas, semicolons or
+new lines (`"a@x.com, b@x.com"`). This works the same for email, SMS, Telegram and WhatsApp. Duplicates are removed and each
+recipient gets its own message, so the response has `message_ids` (one per recipient) and `to_deduped` instead of `message_id`.
 
 **Checking delivery.** Delivery is asynchronous, so `queued` does not mean delivered. See the result and every
 attempt on the **Messages** page of the web app (`/gateway/messages`).

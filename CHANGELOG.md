@@ -32,6 +32,8 @@ project uses [Semantic Versioning](https://semver.org/).
   `GET /v1/templates/email` and `GET /v1/templates/email/{template}` (now in the API reference under
   **Templates**, with the other lookup) list the IDs and the context keys each needs, with an example request. Templates are saved in the database (SQLite or MongoDB),
   so they move with the rest of your data.
+- **Several recipients in one string.** `to` accepts `"a@x.com, b@x.com"` (separated by commas, semicolons or new lines)
+  as well as a list, on every channel: email, SMS, Telegram and WhatsApp. Each recipient still gets its own message.
 - **Per-channel send endpoints** in the API reference, grouped Email / SMS / Push: plain and template
   variants for email (`/v1/messages/email`, `/email/template`) and SMS (`/sms`, `/sms/template`), and
   `/push`. Each has only its own fields and examples; the template endpoints document the

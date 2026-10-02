@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Channel = Literal["push", "email", "sms", "telegram", "whatsapp"]
 EmailType = Literal["txt", "html"]
@@ -14,9 +14,30 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 
+_SPLIT_RE = re.compile(r"[,;\n]+")
+
+
+def split_recipients(to: Any) -> Any:
+    """Recipients may come as one value, a list, or a string with several values separated by commas,
+    semicolons or new lines ("a@x.com, b@x.com"). Return a list when there is more than one, else the
+    value as it was. Works the same for every channel (emails, phone numbers, chat ids)."""
+    if isinstance(to, str):
+        parts = [p.strip() for p in _SPLIT_RE.split(to) if p.strip()]
+        return parts if len(parts) > 1 else to
+    if isinstance(to, list):
+        out: list[Any] = []
+        for item in to:
+            if isinstance(item, str):
+                out.extend(p.strip() for p in _SPLIT_RE.split(item) if p.strip())
+            else:
+                out.append(item)
+        return out
+    return to
+
+
 class MessageRequest(BaseModel):
     channel: Channel = Field(description="Where to send: `email`, `sms`, `push`, `telegram` or `whatsapp`.")
-    to: Optional[Union[str, list[str]]] = Field(None, description="Recipient(s). An email address for `email`; a phone number with country code, e.g. `+15551234567`, for `sms` and `whatsapp` (omit to use the default phone number); a chat id for `telegram` (omit to use the default chat id); not needed for `push`. May be a list.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Recipient(s). An email address for `email`; a phone number with country code, e.g. `+15551234567`, for `sms` and `whatsapp` (omit to use the default phone number); a chat id for `telegram` (omit to use the default chat id); not needed for `push`. May be a list, or one string with several recipients separated by commas.")
     subject: Optional[str] = Field(None, description="Required for `email`. Used as the title for `push`.")
     body: Optional[str] = Field(None, description="The message text. Required unless `template` is given.")
     template: Optional[str] = Field(None, description="Name of a server-side template to use instead of `body`.")
@@ -33,6 +54,11 @@ class MessageRequest(BaseModel):
     url_title: Optional[str] = Field(None, description="Push only: text for the attached link.")
 
     meta: dict[str, Any] = Field(default_factory=dict, description="Optional extra data stored with the message.")
+
+    @field_validator("to", mode="before")
+    @classmethod
+    def _split_to(cls, v: Any) -> Any:
+        return split_recipients(v)
 
     @model_validator(mode="after")
     def _validate_request(self) -> "MessageRequest":
@@ -121,7 +147,7 @@ class _ChannelMessage(BaseModel):
 
 class EmailMessage(_ChannelMessage):
     _channel = "email"
-    to: Union[str, list[str]] = Field(description="Recipient email address, or a list of addresses.")
+    to: Union[str, list[str]] = Field(description="Recipient email address, a list of addresses, or one string with several addresses separated by commas (`\"a@x.com, b@x.com\"`). Each recipient gets its own message.")
     subject: str = Field(description="Subject line.")
     body: str = Field(description="The message text.")
     emailType: EmailType = Field("txt", description="`txt` (default) or `html`.")
@@ -130,7 +156,7 @@ class EmailMessage(_ChannelMessage):
 
 class EmailTemplateMessage(_ChannelMessage):
     _channel = "email"
-    to: Union[str, list[str]] = Field(description="Recipient email address, or a list of addresses.")
+    to: Union[str, list[str]] = Field(description="Recipient email address, a list of addresses, or one string with several addresses separated by commas (`\"a@x.com, b@x.com\"`). Each recipient gets its own message.")
     subject: str = Field(description="Subject line. May contain `{{ context.key }}` placeholders.")
     template: str = Field(description=_EMAIL_TEMPLATE_DESC)
     context: dict[str, Any] = Field(default_factory=dict, description=_CONTEXT_DESC)
@@ -140,14 +166,14 @@ class EmailTemplateMessage(_ChannelMessage):
 
 class SmsMessage(_ChannelMessage):
     _channel = "sms"
-    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567` (digits only after the `+`), or a list. The API sends it as given and does not guess a country code. Omit to use the default phone number set in the web app.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567` (digits only after the `+`), a list, or several separated by commas. The API sends it as given and does not guess a country code. Omit to use the default phone number set in the web app.")
     body: str = Field(description="The message text.")
     provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `custom_http`, `twilio`, `infobip`, `sinch` (only the ones connected in the web app work).")
 
 
 class SmsTemplateMessage(_ChannelMessage):
     _channel = "sms"
-    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567` (digits only after the `+`), or a list. The API sends it as given and does not guess a country code. Omit to use the default phone number set in the web app.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567` (digits only after the `+`), a list, or several separated by commas. The API sends it as given and does not guess a country code. Omit to use the default phone number set in the web app.")
     template: str = Field(description=_SMS_TEMPLATE_DESC)
     context: dict[str, Any] = Field(default_factory=dict, description=_CONTEXT_DESC)
     provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `custom_http`, `twilio`, `infobip`, `sinch` (only the ones connected in the web app work).")
@@ -155,14 +181,14 @@ class SmsTemplateMessage(_ChannelMessage):
 
 class TelegramMessage(_ChannelMessage):
     _channel = "telegram"
-    to: Optional[Union[str, list[str]]] = Field(None, description="Chat id (a number, e.g. `123456789`), or a list. Find yours with 'Find chat IDs' in the web app (Channels > Telegram). Omit to use the default chat ID set in the web app.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Chat id (a number, e.g. `123456789`), a list, or several separated by commas. Find yours with 'Find chat IDs' in the web app (Channels > Telegram). Omit to use the default chat ID set in the web app.")
     body: str = Field(description="The message text.")
     provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `bot_api` (only if connected in the web app).")
 
 
 class WhatsAppMessage(_ChannelMessage):
     _channel = "whatsapp"
-    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567`, or a list. Omit to use the default recipient set in the web app. Only delivers if this number has messaged your WhatsApp business number in the last 24 hours - see Channels > WhatsApp.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567`, a list, or several separated by commas. Omit to use the default recipient set in the web app. Only delivers if this number has messaged your WhatsApp business number in the last 24 hours - see Channels > WhatsApp.")
     body: str = Field(description="The message text.")
     provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `cloud_api` (only if connected in the web app).")
 
