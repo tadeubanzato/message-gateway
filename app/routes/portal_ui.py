@@ -19,7 +19,7 @@ from app.routes.portal import (
     _get_active_apps, _iso, _redirect, _require_account_or_redirect,
     _load_account_from_session, page_ctx, templates,
 )
-from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, message_log, secret_store
+from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, key_check, message_log, secret_store
 from app.services.phone import normalize_phone
 from app.services.auth_passwords import hash_password, verify_password
 from app.version import APP_VERSION
@@ -384,6 +384,7 @@ def settings_page(request: Request):
         public_base_url_env_locked=bool((os.environ.get("PUBLIC_BASE_URL") or "").strip()),
         detected_base_url=str(request.base_url).rstrip("/"),
         sso=cf_access.settings(), aud_last4=channels.mask_tail(cf_access.settings()["aud"]),
+        keys=key_check.status(force=True),
     ))
 
 
@@ -591,3 +592,19 @@ def email_template_delete(request: Request, body: TemplateName):
     if not email_templates.delete(body.id):
         raise HTTPException(status_code=404, detail="No saved copy of that template to delete.")
     return {"ok": True, "templates": email_templates.list_templates()}
+
+
+# ---------------------------------------------------------------------
+# Encryption keys (administrator only)
+# ---------------------------------------------------------------------
+@router.post("/gateway/settings/keys/purge", include_in_schema=False)
+def keys_purge(request: Request):
+    _owner_or_error(request)
+    return {"ok": True, "removed": key_check.purge_unreadable()}
+
+
+@router.post("/gateway/settings/keys/accept-token", include_in_schema=False)
+def keys_accept_token(request: Request):
+    _owner_or_error(request)
+    key_check.accept_token_secret()
+    return {"ok": True}

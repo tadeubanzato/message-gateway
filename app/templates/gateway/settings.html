@@ -63,6 +63,36 @@
   {% endif %}
 </div>
 
+<div class="card" id="keys">
+  <h2>Encryption keys</h2>
+  <p class="muted" style="margin-top:0">Saved credentials are encrypted in the database with a key that is <b>not</b> in the database: it lives in this install's data volume (or your <code>.env</code>). If the volume is replaced, or another install shares this database with its own key, those credentials can't be read and have to be entered again.</p>
+  <div class="kv">
+    <div class="k">Encryption key</div><div><span class="tail">{{ keys.encryption_key }}</span> {{ 'pinned in .env' if keys.encryption_key_pinned else 'stored in the data volume' }}</div>
+    <div class="k">API token secret</div><div><span class="tail">{{ keys.token_secret }}</span> {{ 'pinned in .env' if keys.token_secret_pinned else 'stored in the data volume' }}</div>
+    <div class="k">Saved settings</div><div>{% if keys.unreadable %}<span class="badge failed">{{ keys.unreadable }} can't be read</span>{% else %}<span class="badge ready">All readable</span>{% endif %}</div>
+    <div class="k">API tokens</div><div>{% if keys.token_mismatch %}<span class="badge failed">Older tokens will be rejected</span>{% else %}<span class="badge ready">Match</span>{% endif %}</div>
+  </div>
+  <p class="muted" style="margin-bottom:0">The fingerprints are short labels you can compare between installs; they don't reveal the keys.</p>
+
+  {% if keys.unreadable %}
+  <div class="msg err">
+    These settings were saved with a different key: <code>{{ keys.unreadable_names | join(', ') }}</code>. Either put the original key in <code>.env</code> (below), or enter the credentials again on the Channels pages, then remove the unreadable ones.
+    <div class="row" style="margin-top:8px"><button class="btn ghost sm" id="purgeKeys">Remove {{ keys.unreadable }} unreadable setting{{ '' if keys.unreadable == 1 else 's' }}</button></div>
+  </div>
+  {% endif %}
+  {% if keys.token_mismatch %}
+  <div class="msg err">
+    This install's token secret is not the one the existing API tokens were created with, so those tokens are rejected. Put the original <code>TOKEN_HMAC_SECRET</code> in <code>.env</code>, or create new keys on the API keys page, then dismiss this.
+    <div class="row" style="margin-top:8px"><button class="btn ghost sm" id="acceptToken">Dismiss (I created new keys)</button></div>
+  </div>
+  {% endif %}
+
+  <h3 style="margin-bottom:6px">Keep the keys across rebuilds</h3>
+  <p class="muted" style="margin-top:0">Run this on the server, paste the output into the <code>.env</code> next to <code>docker-compose.yml</code>, then <code>docker compose up -d --force-recreate</code>. Treat the output like a password.</p>
+  <pre><code>docker compose exec gateway python -m app.keys</code></pre>
+  <div id="kout"></div>
+</div>
+
 <div class="card">
   <h2>Import from an existing .env file</h2>
   <p class="muted" style="margin-top:0">Moving from an older install? Choose or paste its <code>.env</code> file and the gateway saves the email, SMS and push settings it finds, encrypted. Your old SMS modem settings become a custom SMS endpoint. Nothing leaves this gateway, and only setting <em>names</em> are shown afterwards.</p>
@@ -114,6 +144,17 @@
 {% endblock %}
 {% block scripts %}
 <script>
+  function keyAction(id, path, done) {
+    var el = document.getElementById(id); if (!el) return;
+    el.onclick = function () {
+      var out = document.getElementById("kout"); el.disabled = true;
+      window.MG.post(path, {}).then(done).then(function () { location.reload(); })
+        .catch(function (e) { window.MG.say(out, e.message, "err"); el.disabled = false; });
+    };
+  }
+  keyAction("purgeKeys", "/gateway/settings/keys/purge", function () {});
+  keyAction("acceptToken", "/gateway/settings/keys/accept-token", function () {});
+
   document.getElementById("saveGeneral").onclick = function (ev) {
     var b = ev.target, out = document.getElementById("gout"); b.disabled = true;
     window.MG.post("/gateway/settings/general", { store_content: document.getElementById("storeContent").checked, allow_signups: document.getElementById("allowSignups").checked })

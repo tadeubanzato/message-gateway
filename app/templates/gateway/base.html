@@ -63,6 +63,11 @@
   <b>Your data is not on a persistent volume.</b> Accounts, settings and messages will be lost when this container is removed. Start the gateway with <code>./install.sh</code>.
 </div>
 {% endif %}
+{% if not bare and key_warning %}
+<div class="msg" style="margin:0;border-radius:0;background:var(--errbg);color:var(--err);text-align:center">
+  <b>This gateway's encryption keys don't match its database.</b> Some saved credentials can't be read, or API tokens may be rejected. <a href="/gateway/settings#keys" style="color:inherit;text-decoration:underline">See Settings &gt; Encryption keys</a>.
+</div>
+{% endif %}
 {% block body %}<main class="wrap">{% block content %}{% endblock %}</main>{% endblock %}
 <script>
   document.addEventListener("click", function (e) {

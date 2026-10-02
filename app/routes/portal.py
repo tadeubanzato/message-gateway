@@ -26,7 +26,7 @@ from starlette.templating import Jinja2Templates
 from app import bootstrap
 from app.db import get_repository
 from app.db.base import DuplicateEmailError, DuplicateUserKeyError
-from app.services import access, cf_access, channels, message_log
+from app.services import access, cf_access, channels, key_check, message_log
 from app.services.env import public_base_url
 from app.services.auth_passwords import hash_password, verify_password
 from app.services.auth_tokens import generate_raw_token, hmac_token_hash_hex, new_user_key, token_last4
@@ -60,6 +60,7 @@ def page_ctx(request: Request, account: dict[str, Any], active: str = "", **extr
         "user_key": account.get("user_key", ""), "is_owner": access.is_owner(account),
         "base_url": public_base_url(request),
         "email_ready": bool(channels.connected_providers("email")),
+        "key_warning": access.is_owner(account) and key_check.has_problem(key_check.status()),
         "warn_not_persistent": not bootstrap.data_is_persistent(),
         **extra,
     }

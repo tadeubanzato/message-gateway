@@ -11,6 +11,12 @@ project uses [Semantic Versioning](https://semver.org/).
   are gone, so there is one place for the API documentation.
 
 ### Added
+- **Warning when the encryption keys don't match the database.** Saved credentials are encrypted with a key kept
+  in the data volume; if the volume is replaced, or another install shares the database with its own key, they
+  silently looked "not set up". Now there is a banner for administrators on every page, a startup log warning, and
+  **Settings > Encryption keys** (fingerprints, which settings can't be read, remove them once re-entered, dismiss
+  the API-token warning). `docker compose exec gateway python -m app.keys` prints the keys to pin in `.env`.
+  Documented in the README ("Keeping your credentials readable").
 - **Email template builder** (Templates in the top menu, administrators, once Email is set up): paste
   or upload HTML (or text), edit it right in the preview, select any text to turn it into a
   `{{ context.name }}` placeholder, and see the request payload your app should send. Each saved template gets an ID (`tpl_...`); the
