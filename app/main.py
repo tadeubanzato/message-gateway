@@ -19,7 +19,7 @@ from app.mcp_server.server import mcp
 from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
 from app.routes.portal_ui import router as portal_ui_router
-from app.services import access, channels, email_templates, message_log
+from app.services import access, channels, email_templates, key_check, message_log
 from app.services.env import public_base_url
 from app.version import APP_NAME, APP_VERSION
 from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, TelegramMessage, WhatsAppMessage, MessageRequest, MessageResponse
@@ -60,6 +60,10 @@ async def _lifespan(app: FastAPI):
         access.ensure_roles()
     except Exception:
         pass  # a labelling problem must never stop the gateway from starting
+    try:
+        key_check.log_startup()
+    except Exception:
+        pass  # a diagnostic must never stop the gateway from starting
     threading.Thread(target=_purge_loop, name="log-purge", daemon=True).start()
     async with mcp.session_manager.run():
         yield

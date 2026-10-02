@@ -417,7 +417,7 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
 | "Port 8010 is already in use" | `MG_PORT=9000 ./install.sh` |
 | Setup page doesn't open | Open `http://localhost:8010` yourself |
 | Red banner: "not on a persistent volume" | You started it without `install.sh`; use `./install.sh` so data survives |
-| "N saved credentials can't be read" | The encryption key changed (volume replaced); enter them again on the Channels pages. Old API keys may need re-creating |
+| "N saved credentials can't be read", or a red banner about encryption keys | The encryption key changed (volume replaced, or another install with its own key shares this database). Put the original key in `.env` (see **Keeping your credentials readable**), or enter them again on the Channels pages. Old API keys may need re-creating |
 | A send returns "No … provider is connected" | The administrator connects one under Channels |
 | A send returns "… is turned off on the gateway" | That provider is connected but switched off - click its Enabled/Disabled pill on the Channels page to turn it back on, or pick a different connected provider with `"provider"` |
 | Mail is rejected | The sender address must be verified with Mailjet/SendGrid |
@@ -443,6 +443,30 @@ from - a server IP, a domain, a tunnel address all just work automatically. If y
 reverse proxy or tunnel that doesn't forward the original address, so the gateway only ever sees
 its own internal one, set it once in **Settings → Public address** (or `PUBLIC_BASE_URL` in
 `.env` for a locked-down install).
+
+### Keeping your credentials readable
+
+Provider credentials (and other settings) are saved in your database, **encrypted**. The key that encrypts
+them is *not* in the database: it is generated on first start and kept in this install's data volume
+(`bootstrap.json`), next to a second secret that hashes your API tokens. If the volume is replaced while the
+database is kept (a rebuild from another folder, `docker compose down -v`), or a second install shares the
+same database with its own keys, the saved credentials can't be read and old API tokens are rejected.
+
+The gateway now tells you: a red banner for administrators on every page, a warning in the container log at
+startup, and **Settings > Encryption keys**, which shows short fingerprints (so you can compare installs),
+which saved settings can't be read, and buttons to remove them once you've entered the credentials again.
+
+To make this impossible after a rebuild, **pin the keys** on each server:
+
+```bash
+docker compose exec gateway python -m app.keys      # prints SETTINGS_ENCRYPTION_KEY=... and TOKEN_HMAC_SECRET=...
+# paste both lines into .env (next to docker-compose.yml), then:
+docker compose up -d --force-recreate
+```
+
+- Treat those two values like passwords, and back them up. Anyone with the database *and* the key can read the credentials.
+- Don't point two installs at one database unless they use the same pinned keys; whichever saved last would otherwise make the other's credentials unreadable.
+- If you use MongoDB Atlas on a server, also consider setting `MONGODB_URI` in `.env` instead of leaving the connection string in the data volume's `bootstrap.json`.
 
 ### API documentation
 
