@@ -19,7 +19,7 @@ from app.mcp_server.server import mcp
 from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
 from app.routes.portal_ui import router as portal_ui_router
-from app.services import access, channels, message_log
+from app.services import access, channels, email_templates, message_log
 from app.services.env import public_base_url
 from app.version import APP_NAME, APP_VERSION
 from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, TelegramMessage, WhatsAppMessage, MessageRequest, MessageResponse
@@ -200,7 +200,7 @@ EMAIL_TEMPLATE_DIR = os.environ.get("EMAIL_TEMPLATE_DIR", "/app/templates/email"
 TEMPLATE_STRICT = os.environ.get("TEMPLATE_STRICT", "true").strip().lower() in ("1", "true", "yes", "y")
 
 _TEMPLATE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-_CONTEXT_TOKEN_RE = re.compile(r"\{\{\s*context\.([A-Za-z0-9_]+)\s*\}\}")
+_CONTEXT_TOKEN_RE = re.compile(r"\{\{(?:\s|&nbsp;)*context\.([A-Za-z0-9_]+)(?:\s|&nbsp;)*\}\}")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -218,8 +218,13 @@ def _load_template_text(template_name: str, req: MessageRequest) -> str:
     name = (template_name or "").strip()
     if not name or not _TEMPLATE_NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Template not found")
-    base_dir = _template_dir_for_channel(req.channel)
     ext = _template_ext_for_request(req)
+    if req.channel == "email":
+        text = email_templates.read(name, ext)
+        if text is None:
+            raise HTTPException(status_code=400, detail="Template not found")
+        return text
+    base_dir = _template_dir_for_channel(req.channel)
     path = os.path.join(base_dir, f"{name}.{ext}")
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -341,6 +346,12 @@ def get_sms_template_expected_context(template_name: str, auth: dict = Depends(r
         "template": template_name, "channel": "sms", "required_context_keys": keys,
         "example_context": {k: "<required>" for k in keys}, "template_strict": TEMPLATE_STRICT,
     }
+
+
+@app.get("/v1/templates/email", include_in_schema=False, tags=["Templates"], summary="List email templates")
+def list_email_templates(auth: dict = Depends(require_api_key)):
+    return {"templates": [{"id": t["id"], "name": t["name"], "required_context_keys": t["keys"],
+                           "has_html": t["has_html"], "has_txt": t["has_txt"]} for t in email_templates.list_templates()]}
 
 
 @app.get("/v1/templates/email/{template_name}", include_in_schema=False, tags=["Templates"], summary="Get an email template")

@@ -19,7 +19,7 @@ from app.routes.portal import (
     _get_active_apps, _iso, _redirect, _require_account_or_redirect,
     _load_account_from_session, page_ctx, templates,
 )
-from app.services import access, cf_access, channels, db_switch, dispatch, message_log, secret_store
+from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, message_log, secret_store
 from app.services.phone import normalize_phone
 from app.services.auth_passwords import hash_password, verify_password
 from app.version import APP_VERSION
@@ -515,3 +515,79 @@ def settings_sso_save(request: Request, body: SsoBody):
         raise HTTPException(status_code=400, detail=f"Details saved, but Cloudflare Access is not turned on yet: {e.detail}")
     secret_store.set_setting(cf_access.ENABLED_KEY, "1")
     return {"ok": True, "enabled": True, "team": team}
+
+
+# ---------------------------------------------------------------------
+# Email template builder (administrator only, and only once Email is set up)
+# ---------------------------------------------------------------------
+def _email_ready() -> bool:
+    return bool(channels.connected_providers("email"))
+
+
+def _templates_owner(request: Request) -> dict[str, Any]:
+    account = _owner_or_error(request)
+    if not _email_ready():
+        raise HTTPException(status_code=409, detail="Set up Email first.")
+    return account
+
+
+@router.get("/gateway/templates", response_class=HTMLResponse)
+def templates_index():
+    # Email is the only template type so far; this is where a channel picker goes later.
+    return _redirect("/gateway/templates/email")
+
+
+@router.get("/gateway/templates/email", response_class=HTMLResponse)
+def email_templates_page(request: Request):
+    redirect, account = _require_account_or_redirect(request)
+    if redirect:
+        return redirect
+    assert account is not None
+    if not access.is_owner(account):
+        return _forbidden(request, account, "templates")
+    if not _email_ready():
+        return _redirect("/gateway/channels/email")
+    resp = templates.TemplateResponse("gateway/email_templates.html", page_ctx(
+        request, account, "templates", payload={"templates": email_templates.list_templates(),
+                 "base_url": page_ctx(request, account)["base_url"], "user_key": account.get("user_key", "")},
+    ))
+    resp.headers["Cache-Control"] = "no-store"   # the page's script changes often; never show a stale copy
+    return resp
+
+
+@router.get("/gateway/templates/email/item/{ref}", include_in_schema=False)
+def email_template_get(request: Request, ref: str):
+    _templates_owner(request)
+    t = email_templates.get(ref)
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return t
+
+
+class TemplateBody(BaseModel):
+    id: Optional[str] = None
+    name: str
+    html: str = ""
+    txt: str = ""
+
+
+@router.post("/gateway/templates/email/save", include_in_schema=False)
+def email_template_save(request: Request, body: TemplateBody):
+    _templates_owner(request)
+    try:
+        t = email_templates.save(body.id, body.name, body.html, body.txt)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "template": t, "templates": email_templates.list_templates()}
+
+
+class TemplateName(BaseModel):
+    id: str
+
+
+@router.post("/gateway/templates/email/delete", include_in_schema=False)
+def email_template_delete(request: Request, body: TemplateName):
+    _templates_owner(request)
+    if not email_templates.delete(body.id):
+        raise HTTPException(status_code=404, detail="No saved copy of that template to delete.")
+    return {"ok": True, "templates": email_templates.list_templates()}

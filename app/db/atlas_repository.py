@@ -13,7 +13,7 @@ from bson import ObjectId
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError
 
-from app.db.base import DuplicateEmailError, DuplicateUserKeyError, Repository
+from app.db.base import DuplicateEmailError, DuplicateTemplateNameError, DuplicateUserKeyError, Repository
 
 _NINETY_DAYS_SECONDS = 90 * 24 * 3600
 
@@ -215,6 +215,26 @@ class AtlasRepository(Repository):
     def delete_setting(self, name: str) -> None:
         self._db.settings.delete_one({"_id": name})
 
+    # ---- email templates ----
+    def list_email_templates(self) -> list[dict[str, Any]]:
+        docs = [{**d, "_id": str(d["_id"])} for d in self._db.email_templates.find({})]
+        return sorted(docs, key=lambda d: d.get("name", "").lower())
+
+    def get_email_template(self, template_id: str) -> Optional[dict[str, Any]]:
+        return _stringify_id(self._db.email_templates.find_one({"_id": template_id}))
+
+    def find_email_template_by_name(self, name: str) -> Optional[dict[str, Any]]:
+        return _stringify_id(self._db.email_templates.find_one({"name": name}))
+
+    def save_email_template(self, doc: dict[str, Any]) -> None:
+        try:
+            self._db.email_templates.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+        except DuplicateKeyError as e:
+            raise DuplicateTemplateNameError(doc["name"]) from e
+
+    def delete_email_template(self, template_id: str) -> bool:
+        return self._db.email_templates.delete_one({"_id": template_id}).deleted_count > 0
+
     # ---- move data to another database ----
     @staticmethod
     def _epoch(d: dict[str, Any]) -> float:
@@ -234,6 +254,7 @@ class AtlasRepository(Repository):
             "attempts": [{**without(d, "_id", "created_at"), "_id": str(d["_id"]), "_created_at": self._epoch(d)}
                          for d in self._db.attempts.find({})],
             "settings": [{**d, "_id": str(d["_id"])} for d in self._db.settings.find({})],
+            "email_templates": [{**d, "_id": str(d["_id"])} for d in self._db.email_templates.find({})],
         }
 
     def import_data(self, data: dict[str, list[dict[str, Any]]]) -> None:
@@ -256,10 +277,13 @@ class AtlasRepository(Repository):
         for d in data.get("settings", []):
             doc = dict(d); name = doc.pop("_id")
             self._db.settings.replace_one({"_id": name}, {"_id": name, **doc}, upsert=True)
+        for d in data.get("email_templates", []):
+            doc = {**d, "_id": str(d["_id"])}
+            self._db.email_templates.replace_one({"_id": doc["_id"]}, doc, upsert=True)
 
     def counts(self) -> dict[str, int]:
         return {t: int(self._db[t].count_documents({}))
-                for t in ("accounts", "portal_sessions", "messages", "attempts", "settings")}
+                for t in ("accounts", "portal_sessions", "messages", "attempts", "settings", "email_templates")}
 
     # ---- lifecycle ----
     def ensure_indexes(self) -> None:
@@ -277,6 +301,8 @@ class AtlasRepository(Repository):
             "created_at", expireAfterSeconds=_NINETY_DAYS_SECONDS, name="ttl_messages_90d"
         )
         msgs.create_index("channel", name="idx_channel")
+
+        self._db.email_templates.create_index("name", unique=True, name="uniq_template_name")
 
         atts = self._db.attempts
         atts.create_index("message_id", name="idx_message_id")

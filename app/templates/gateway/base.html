@@ -25,6 +25,7 @@
           <a href="/gateway/channels/whatsapp">WhatsApp</a>
         </div>
       </details>
+      {% if email_ready %}<a href="/gateway/templates" class="{{ 'on' if active == 'templates' }}">Templates</a>{% endif %}
       {% endif %}
       <a href="/gateway/messages" class="{{ 'on' if active == 'messages' }}">Message log</a>
       <a href="/gateway/about" class="{{ 'on' if active == 'about' }}">About</a>

@@ -284,6 +284,11 @@ Ana receives the subject `Welcome, Ana` and the `welcome.txt` body with her name
 
 - **Email**: `emailType` picks the file (`html` uses `<name>.html`, otherwise `<name>.txt`), so provide
   both files if you send both. Placeholders also work in `subject`.
+- **Template builder (email)**: in the web app, Templates (top menu, once Email is set up)
+  lets an administrator paste or upload HTML, add placeholders and preview it. Every saved template has
+  an ID like `tpl_1a2b3c4d5e6f`; send it as `template` (the name works too) with `context` holding that
+  recipient's values. `GET /v1/templates/email` (API key) lists IDs and the context keys each needs.
+  Saved templates are stored in your gateway database (SQLite or MongoDB, whichever you set up), so they move with the rest of your data when you switch or export it. A saved name wins over a built-in file of the same name.
 - **Strict by default**: a placeholder with no value in `context` returns a 400. Set
   `TEMPLATE_STRICT=false` to fill it with an empty string instead. An unknown template name is a 400.
 - The folders are mounted into the container, so new templates are picked up without a rebuild.
