@@ -105,7 +105,10 @@ _EMAIL_TEMPLATE_DESC = ("ID (e.g. `tpl_1a2b3c4d5e6f`, shown in the web app's Tem
 _SMS_TEMPLATE_DESC = "Name of a saved SMS template, e.g. `welcome`. Loads `<name>.txt` from `app/templates/sms/`."
 _CONTEXT_DESC = ("Values for the `{{ context.key }}` placeholders in the template, keyed by the part after `context.` "
                  "(`{{ context.name }}` -> `{\"name\": \"Ana\"}`). Spaces inside the braces are optional; the `context.` "
-                 "prefix is required. A placeholder with no matching key makes the request fail with a 400.")
+                 "prefix is required. A placeholder with no matching key makes the request fail with a 400. In an HTML email "
+                 "each value is made HTML-safe by the gateway: send plain text (line breaks become `<br>`), already-escaped "
+                 "text, or basic HTML (`<br>`, `<b>`/`<bold>`, `<i>`/`<italic>`, `<u>`, lists, `<a href>`); other tags show "
+                 "as text. A key ending in `_html` is inserted as is.")
 
 
 class _ChannelMessage(BaseModel):

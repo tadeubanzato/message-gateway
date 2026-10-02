@@ -146,6 +146,14 @@
     c.querySelectorAll("style[data-mg]").forEach(n => n.remove());
     c.querySelectorAll("[data-mg-ph]").forEach(n => n.replaceWith(doc.createTextNode(n.textContent)));
     c.querySelectorAll("[contenteditable]").forEach(n => n.removeAttribute("contenteditable"));
+    // Chrome can copy the placeholder highlight onto ordinary text as inline styles: never save it
+    c.querySelectorAll("[style]").forEach(n => {
+      const st = n.style, hl = /255,\s*243,\s*191|fff3bf/i.test(st.backgroundColor + st.background) || /201,\s*154,\s*0|c99a00/i.test(st.outline + st.outlineColor);
+      if (!hl) return;
+      ["background", "backgroundColor", "outline", "outlineColor", "outlineStyle", "outlineWidth", "borderRadius"].forEach(p => { st[p] = ""; });
+      if (/^rgb\(0,\s*0,\s*0\)$/.test(st.color)) st.color = "";
+      if (!n.getAttribute("style")) n.removeAttribute("style");
+    });
     // typing in the editor turns spaces into non-breaking ones: save every placeholder as plain {{ context.key }}
     const w = doc.createTreeWalker(c, NodeFilter.SHOW_TEXT), texts = [];
     while (w.nextNode()) texts.push(w.currentNode);

@@ -19,7 +19,7 @@ from app.mcp_server.server import mcp
 from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
 from app.routes.portal_ui import router as portal_ui_router
-from app.services import access, channels, email_templates, key_check, message_log
+from app.services import access, channels, email_templates, html_safe, key_check, message_log
 from app.services.env import public_base_url
 from app.version import APP_NAME, APP_VERSION
 from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, TelegramMessage, WhatsAppMessage, MessageRequest, MessageResponse
@@ -270,7 +270,9 @@ def _extract_required_context_keys(text: str) -> list[str]:
     return sorted(set(_CONTEXT_TOKEN_RE.findall(text or "")))
 
 
-def _render_context(text: str, ctx: dict) -> str:
+def _render_context(text: str, ctx: dict, html: bool = False) -> str:
+    """Fill {{ context.key }}. For an HTML email the gateway makes each value HTML-safe itself
+    (see services/html_safe.py), so the caller can send plain text or already-escaped text."""
     context = ctx or {}
 
     def repl(match: re.Match) -> str:
@@ -280,6 +282,8 @@ def _render_context(text: str, ctx: dict) -> str:
             if TEMPLATE_STRICT:
                 raise HTTPException(status_code=400, detail=f"Missing context key: {key}")
             return ""
+        if html and not html_safe.is_trusted_key(key):
+            return html_safe.to_html(val)
         return str(val)
 
     return _CONTEXT_TOKEN_RE.sub(repl, text)
@@ -462,7 +466,7 @@ def enqueue_message(req: MessageRequest, account_id: Optional[str], source: str 
 
     used_template = (req.template or "").strip() or None
     base_text = _load_template_text(used_template, req=req) if used_template else (req.body or "")
-    final_body = _render_context(base_text, req.context)
+    final_body = _render_context(base_text, req.context, html=(channel == "email" and req.emailType == "html"))
 
     final_subject = None
     if channel == "email":
@@ -548,7 +552,26 @@ _TEMPLATE_RULES = (
     "no value fails the request with a 400 (unless the gateway runs with `TEMPLATE_STRICT=false`, which fills it with "
     "an empty string). An unknown template is also a 400."
 )
-_EMAIL_TEMPLATE_DESC = _SEND_DESC + _TEMPLATE_RULES + """
+_HTML_CONTEXT_RULES = """
+
+### HTML in `context` values
+
+For an HTML email (`emailType: "html"`) the gateway makes every `context` value HTML-safe itself, so the sending
+system does not need to escape anything. Send plain text, text that is already escaped, or text with basic HTML:
+
+- **Plain text** is escaped (`&`, `<`, `>`), and line breaks (`\\n`) become `<br>`.
+- **Already-escaped text** (`&amp;`, `&lt;`, `<br>`, as many automation tools produce) is kept and never double-escaped.
+- **Basic formatting is kept**: `<br>`, `<hr>`, `<b>`/`<strong>`, `<i>`/`<em>`, `<u>`, `<s>`, `<code>`, `<pre>`, `<p>`,
+  `<blockquote>`, `<h1>` to `<h4>`, `<sub>`, `<sup>`, `<small>`, lists (`<ul>`, `<ol>`, `<li>`) and `<a href="...">`
+  with an `http(s)` or `mailto:` link. `<bold>`, `<italic>`, `<underline>` and `<bullets>`/`<item>` are accepted and
+  mapped to the real tag.
+- **Anything else is shown as text, not run**: `<script>`, `<style>`, `<div>`, `<mark>`, event attributes such as
+  `onclick`, and `javascript:` links.
+- **Trusted HTML**: a `context` key that ends in `_html` (for example `table_html`) is inserted exactly as sent.
+
+Subjects, text emails (`emailType: "txt"`) and SMS are never escaped.
+"""
+_EMAIL_TEMPLATE_DESC = _SEND_DESC + _TEMPLATE_RULES + _HTML_CONTEXT_RULES + """
 
 `template` is the **ID** of a template saved in the web app's **Templates** page (e.g. `tpl_1a2b3c4d5e6f`), or a
 template **name**. Saved templates are stored in the gateway's database; a built-in file in `app/templates/email/`
