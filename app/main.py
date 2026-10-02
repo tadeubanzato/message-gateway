@@ -6,7 +6,7 @@ import time
 from typing import Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
@@ -207,7 +207,8 @@ API_TAGS = [
 GATEWAY_BASE_URL = (os.environ.get("GATEWAY_BASE_URL") or "http://localhost:8010").strip().rstrip("/")
 
 app = FastAPI(title=APP_NAME, servers=[{"url": GATEWAY_BASE_URL, "description": "This gateway"}], version=APP_VERSION, description=API_DESCRIPTION, openapi_tags=API_TAGS, lifespan=_lifespan,
-              docs_url=None, redoc_url=None)  # Scalar (/scalar) is the one API reference
+              docs_url=None, redoc_url=None,  # Scalar at /api/docs is the one API reference
+              openapi_url="/api/openapi.json")
 
 # The MCP endpoint requires the same API key and token as the HTTP API.
 app.add_middleware(McpAuthMiddleware)
@@ -308,12 +309,7 @@ def health():
     }
 
 
-@app.get("/docs", include_in_schema=False)
-def docs_redirect():
-    return RedirectResponse("/scalar", status_code=307)
-
-
-@app.get("/scalar", include_in_schema=False)
+@app.get("/api/docs", include_in_schema=False)
 def scalar_docs():
     return get_scalar_api_reference(
         openapi_url=app.openapi_url, title=f"{app.title} API", dark_mode=True,
@@ -351,7 +347,7 @@ def get_started(request: Request):
       <pre><code id="prompt-text">{prompt}</code></pre>
       <button class="btn ghost sm" onclick="copyText(document.getElementById('prompt-text').innerText, this)">Copy prompt</button>
     </div>
-    <p class="muted"><a href="/scalar">API reference</a></p>
+    <p class="muted"><a href="/api/docs">API reference</a></p>
   </main>
   <script src="/static/copy.js"></script>
 </body>

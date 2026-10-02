@@ -6,6 +6,10 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [0.2.0] - Unreleased
 
+### Changed
+- **The API reference moved to `/api/docs`** (its OpenAPI file to `/api/openapi.json`). `/scalar` and `/docs`
+  are gone, so there is one place for the API documentation.
+
 ### Added
 - **Email template builder** (Templates in the top menu, administrators, once Email is set up): paste
   or upload HTML (or text), edit it right in the preview, select any text to turn it into a
