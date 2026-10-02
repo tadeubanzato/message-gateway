@@ -6,7 +6,7 @@ import time
 from typing import Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
@@ -19,7 +19,7 @@ from app.mcp_server.server import mcp
 from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
 from app.routes.portal_ui import router as portal_ui_router
-from app.services import access, channels, message_log
+from app.services import access, channels, email_templates, html_safe, key_check, message_log
 from app.services.env import public_base_url
 from app.version import APP_NAME, APP_VERSION
 from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, TelegramMessage, WhatsAppMessage, MessageRequest, MessageResponse
@@ -60,6 +60,10 @@ async def _lifespan(app: FastAPI):
         access.ensure_roles()
     except Exception:
         pass  # a labelling problem must never stop the gateway from starting
+    try:
+        key_check.log_startup()
+    except Exception:
+        pass  # a diagnostic must never stop the gateway from starting
     threading.Thread(target=_purge_loop, name="log-purge", daemon=True).start()
     async with mcp.session_manager.run():
         yield
@@ -163,6 +167,31 @@ connected, an agent discovers the available tools itself; broadly, they cover:
 
 Provider credentials, API keys, and settings are never exposed through MCP - those stay in the web app.
 
+## Email templates (IDs and `context`)
+
+Build email templates in the web app under **Templates** (administrators, once Email is set up): paste or upload
+HTML, edit it in the preview, and select text to turn it into a placeholder such as `{{ context.name }}`. Every
+saved template gets an **ID** (like `tpl_1a2b3c4d5e6f`). Your app sends that ID as `template`, plus a `context`
+object with each recipient's values:
+
+```json
+{
+  "to": "ana@example.com",
+  "subject": "Welcome, {{ context.name }}",
+  "template": "tpl_1a2b3c4d5e6f",
+  "emailType": "html",
+  "context": { "name": "Ana" }
+}
+```
+
+- A placeholder must start with `context.`; spaces inside the braces are optional (`{{ context.name }}` and
+  `{{context.name}}` both work). The `context` key is what follows `context.` - here `name`, not `context.name`.
+  A bare `{{ name }}` is never filled in.
+- `template` takes the ID or the template's name. Built-in file templates (like `welcome`) have no ID and are sent by name.
+- The **Templates** page shows the exact JSON (and a `curl` command) for each template. To read it from your code, call
+  `GET /v1/templates/email` (every template with its ID and required keys) or `GET /v1/templates/email/{template}`.
+- A placeholder with no value in `context` is a `400`. Templates are stored in the gateway's database.
+
 ## Quick start
 
 Pick the endpoint for your channel: **Email**, **SMS** or **Push**. Email and SMS each have a plain-text endpoint and a template endpoint.
@@ -177,12 +206,14 @@ API_TAGS = [
     {"name": "Push", "description": "Send a push notification."},
     {"name": "Telegram", "description": "Send a Telegram message via a bot."},
     {"name": "WhatsApp", "description": "Send a WhatsApp message via the WhatsApp Business Platform (Cloud API)."},
+    {"name": "Templates", "description": "Look up the email and SMS templates you can send by ID or name, and the `context` values each needs."},
 ]
 
 GATEWAY_BASE_URL = (os.environ.get("GATEWAY_BASE_URL") or "http://localhost:8010").strip().rstrip("/")
 
 app = FastAPI(title=APP_NAME, servers=[{"url": GATEWAY_BASE_URL, "description": "This gateway"}], version=APP_VERSION, description=API_DESCRIPTION, openapi_tags=API_TAGS, lifespan=_lifespan,
-              docs_url=None, redoc_url=None)  # Scalar (/scalar) is the one API reference
+              docs_url=None, redoc_url=None,  # Scalar at /api/docs is the one API reference
+              openapi_url="/api/openapi.json")
 
 # The MCP endpoint requires the same API key and token as the HTTP API.
 app.add_middleware(McpAuthMiddleware)
@@ -201,7 +232,7 @@ EMAIL_TEMPLATE_DIR = os.environ.get("EMAIL_TEMPLATE_DIR", "/app/templates/email"
 TEMPLATE_STRICT = os.environ.get("TEMPLATE_STRICT", "true").strip().lower() in ("1", "true", "yes", "y")
 
 _TEMPLATE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-_CONTEXT_TOKEN_RE = re.compile(r"\{\{\s*context\.([A-Za-z0-9_]+)\s*\}\}")
+_CONTEXT_TOKEN_RE = re.compile(r"\{\{(?:\s|&nbsp;)*context\.([A-Za-z0-9_]+)(?:\s|&nbsp;)*\}\}")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -219,8 +250,13 @@ def _load_template_text(template_name: str, req: MessageRequest) -> str:
     name = (template_name or "").strip()
     if not name or not _TEMPLATE_NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Template not found")
-    base_dir = _template_dir_for_channel(req.channel)
     ext = _template_ext_for_request(req)
+    if req.channel == "email":
+        text = email_templates.read(name, ext)
+        if text is None:
+            raise HTTPException(status_code=400, detail="Template not found")
+        return text
+    base_dir = _template_dir_for_channel(req.channel)
     path = os.path.join(base_dir, f"{name}.{ext}")
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -235,7 +271,9 @@ def _extract_required_context_keys(text: str) -> list[str]:
     return sorted(set(_CONTEXT_TOKEN_RE.findall(text or "")))
 
 
-def _render_context(text: str, ctx: dict) -> str:
+def _render_context(text: str, ctx: dict, html: bool = False) -> str:
+    """Fill {{ context.key }}. For an HTML email the gateway makes each value HTML-safe itself
+    (see services/html_safe.py), so the caller can send plain text or already-escaped text."""
     context = ctx or {}
 
     def repl(match: re.Match) -> str:
@@ -245,6 +283,8 @@ def _render_context(text: str, ctx: dict) -> str:
             if TEMPLATE_STRICT:
                 raise HTTPException(status_code=400, detail=f"Missing context key: {key}")
             return ""
+        if html and not html_safe.is_trusted_key(key):
+            return html_safe.to_html(val)
         return str(val)
 
     return _CONTEXT_TOKEN_RE.sub(repl, text)
@@ -278,12 +318,7 @@ def health():
     }
 
 
-@app.get("/docs", include_in_schema=False)
-def docs_redirect():
-    return RedirectResponse("/scalar", status_code=307)
-
-
-@app.get("/scalar", include_in_schema=False)
+@app.get("/api/docs", include_in_schema=False)
 def scalar_docs():
     return get_scalar_api_reference(
         openapi_url=app.openapi_url, title=f"{app.title} API", dark_mode=True,
@@ -321,7 +356,7 @@ def get_started(request: Request):
       <pre><code id="prompt-text">{prompt}</code></pre>
       <button class="btn ghost sm" onclick="copyText(document.getElementById('prompt-text').innerText, this)">Copy prompt</button>
     </div>
-    <p class="muted"><a href="/scalar">API reference</a></p>
+    <p class="muted"><a href="/api/docs">API reference</a></p>
   </main>
   <script src="/static/copy.js"></script>
 </body>
@@ -333,26 +368,58 @@ def whoami(auth: dict = Depends(require_api_key)):
     return {"ok": True, "account_id": auth.get("account_id"), "user_key": auth.get("user_key")}
 
 
-@app.get("/v1/templates/sms/{template_name}", include_in_schema=False, tags=["Templates"], summary="Get an SMS template")
+_TEMPLATE_LOOKUP_RESPONSES = {
+    400: {"description": "Unknown template."},
+    401: {"description": "Missing or invalid `X-User-Key` / `X-API-Token`."},
+}
+
+
+def _example_request(channel: str, template: str, keys: list[str], email_type: str = "txt") -> dict:
+    ctx = {k: k for k in keys}
+    if channel == "email":
+        return {"to": "ana@example.com", "subject": "Subject", "template": template, "emailType": email_type, "context": ctx}
+    return {"to": "+15551234567", "template": template, "context": ctx}
+
+
+@app.get("/v1/templates/sms/{template_name}", tags=["Templates"], summary="Get an SMS template",
+         description="The `context` keys an SMS template needs, and a ready-to-send example request. SMS templates are "
+                     "files in `app/templates/sms/`, referenced by name.", responses=_TEMPLATE_LOOKUP_RESPONSES)
 def get_sms_template_expected_context(template_name: str, auth: dict = Depends(require_api_key)):
     req = MessageRequest(channel="sms", to="+10000000000", body="x")
     text = _load_template_text(template_name, req=req)
     keys = _extract_required_context_keys(text)
     return {
         "template": template_name, "channel": "sms", "required_context_keys": keys,
-        "example_context": {k: "<required>" for k in keys}, "template_strict": TEMPLATE_STRICT,
+        "example_context": {k: k for k in keys}, "template_strict": TEMPLATE_STRICT,
+        "example_request": _example_request("sms", template_name, keys),
     }
 
 
-@app.get("/v1/templates/email/{template_name}", include_in_schema=False, tags=["Templates"], summary="Get an email template")
-def get_email_template_expected_context(template_name: str, auth: dict = Depends(require_api_key), emailType: str = "txt"):
+@app.get("/v1/templates/email", tags=["Templates"], summary="List email templates",
+         description="Every email template you can send: the ones saved in the web app's Templates page (with an `id`) and "
+                     "the built-in files (`id` is null; send those by `name`). `required_context_keys` are the keys "
+                     "your `context` must contain: the part after `context.` in each `{{ context.key }}` placeholder.",
+         responses={401: _TEMPLATE_LOOKUP_RESPONSES[401]})
+def list_email_templates(auth: dict = Depends(require_api_key)):
+    return {"templates": [{"id": t["id"], "name": t["name"], "source": t["source"], "required_context_keys": t["keys"],
+                           "has_html": t["has_html"], "has_txt": t["has_txt"]} for t in email_templates.list_templates()]}
+
+
+@app.get("/v1/templates/email/{template}", tags=["Templates"], summary="Get an email template",
+         description="The `context` keys one email template needs, and a ready-to-send example request. `template` is the "
+                     "template ID (e.g. `tpl_1a2b3c4d5e6f`) or its name. `emailType` (`html` or `txt`, default `txt`) "
+                     "picks which body the keys are read from.", responses=_TEMPLATE_LOOKUP_RESPONSES)
+def get_email_template_expected_context(template: str, auth: dict = Depends(require_api_key), emailType: str = "txt"):
     et = "html" if str(emailType).strip().lower() == "html" else "txt"
     req = MessageRequest(channel="email", to="x@y.z", subject="x", body="x", emailType=et)  # type: ignore[arg-type]
-    text = _load_template_text(template_name, req=req)
+    text = _load_template_text(template, req=req)
+    found = email_templates.get(template) or {}
     keys = _extract_required_context_keys(text)
     return {
-        "template": template_name, "channel": "email", "emailType": et, "required_context_keys": keys,
-        "example_context": {k: "<required>" for k in keys}, "template_strict": TEMPLATE_STRICT,
+        "template": template, "id": found.get("id"), "name": found.get("name", template), "channel": "email",
+        "emailType": et, "required_context_keys": keys,
+        "example_context": {k: k for k in keys}, "template_strict": TEMPLATE_STRICT,
+        "example_request": _example_request("email", found.get("id") or template, keys, et),
     }
 
 
@@ -400,7 +467,7 @@ def enqueue_message(req: MessageRequest, account_id: Optional[str], source: str 
 
     used_template = (req.template or "").strip() or None
     base_text = _load_template_text(used_template, req=req) if used_template else (req.body or "")
-    final_body = _render_context(base_text, req.context)
+    final_body = _render_context(base_text, req.context, html=(channel == "email" and req.emailType == "html"))
 
     final_subject = None
     if channel == "email":
@@ -481,29 +548,42 @@ _SEND_RESPONSES = {
 _SEND_DESC = ("Queues the message for delivery. It is validated and logged immediately, then delivered in the "
               "background with retries. The response gives the `message_id`.")
 _TEMPLATE_RULES = (
-    "\n\nTemplates are plain files. Placeholders written as `{{ context.name }}` are replaced with the matching "
-    "value from `context`. A placeholder with no value fails the request with a 400 (unless the gateway runs with "
-    "`TEMPLATE_STRICT=false`, which fills it with an empty string). An unknown template name is also a 400."
+    "\n\nPlaceholders written as `{{ context.name }}` (spaces inside the braces are optional, but the `context.` "
+    "prefix is required) are replaced with the matching value from `context`, here the key `name`. A placeholder with "
+    "no value fails the request with a 400 (unless the gateway runs with `TEMPLATE_STRICT=false`, which fills it with "
+    "an empty string). An unknown template is also a 400."
 )
-_EMAIL_TEMPLATE_DESC = _SEND_DESC + _TEMPLATE_RULES + """
+_HTML_CONTEXT_RULES = """
 
-Email templates live in `app/templates/email/` as `<name>.txt` and `<name>.html`. `emailType` decides which
-file is used, so provide both if you send both. `{{ context.key }}` also works in `subject`.
+### HTML in `context` values
+
+For an HTML email (`emailType: "html"`) the gateway makes every `context` value HTML-safe itself, so the sending
+system does not need to escape anything. Send plain text, text that is already escaped, or text with basic HTML:
+
+- **Plain text** is escaped (`&`, `<`, `>`), and line breaks (`\\n`) become `<br>`.
+- **Already-escaped text** (`&amp;`, `&lt;`, `<br>`, as many automation tools produce) is kept and never double-escaped.
+- **Basic formatting is kept**: `<br>`, `<hr>`, `<b>`/`<strong>`, `<i>`/`<em>`, `<u>`, `<s>`, `<code>`, `<pre>`, `<p>`,
+  `<blockquote>`, `<h1>` to `<h4>`, `<sub>`, `<sup>`, `<small>`, lists (`<ul>`, `<ol>`, `<li>`) and `<a href="...">`
+  with an `http(s)` or `mailto:` link. `<bold>`, `<italic>`, `<underline>` and `<bullets>`/`<item>` are accepted and
+  mapped to the real tag.
+- **Anything else is shown as text, not run**: `<script>`, `<style>`, `<div>`, `<mark>`, event attributes such as
+  `onclick`, and `javascript:` links.
+- **Trusted HTML**: a `context` key that ends in `_html` (for example `table_html`) is inserted exactly as sent.
+
+Subjects, text emails (`emailType: "txt"`) and SMS are never escaped.
+"""
+_EMAIL_TEMPLATE_DESC = _SEND_DESC + _TEMPLATE_RULES + _HTML_CONTEXT_RULES + """
+
+`template` is the **ID** of a template saved in the web app's **Templates** page (e.g. `tpl_1a2b3c4d5e6f`), or a
+template **name**. Saved templates are stored in the gateway's database; a built-in file in `app/templates/email/`
+(like `welcome`) is sent by name. `emailType` decides which body is used (`html` or `txt`), so give the template both
+if you send both. `{{ context.key }}` also works in `subject`.
+
+Use `GET /v1/templates/email` to list the IDs and the `context` keys each template needs.
 
 ### Template example
 
-The template file `app/templates/email/welcome.txt`:
-
-```
-Hello {{ context.name }},
-
-Welcome!
-
-Your account is now active.
-If you did not request this, you can safely ignore this email.
-```
-
-(`welcome.html` has the same content as HTML and is used when `emailType` is `html`.)
+A template with the body `Hello {{ context.name }}, welcome!`, saved with ID `tpl_1a2b3c4d5e6f`.
 
 The request:
 
@@ -511,12 +591,13 @@ The request:
 {
   "to": "ana@example.com",
   "subject": "Welcome, {{ context.name }}",
-  "template": "welcome",
+  "template": "tpl_1a2b3c4d5e6f",
+  "emailType": "html",
   "context": { "name": "Ana" }
 }
 ```
 
-What Ana receives: subject `Welcome, Ana`, and the body `Hello Ana, Welcome! Your account is now active. ...`
+What Ana receives: subject `Welcome, Ana`, and the body `Hello Ana, welcome!`.
 """
 _SMS_TEMPLATE_DESC = _SEND_DESC + _TEMPLATE_RULES + """
 

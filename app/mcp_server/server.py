@@ -194,8 +194,9 @@ async def send_notification(
         24 hours.
     subject: required for email; the title for push.
     body: message text. Required unless `template` is given.
-    template: name of a server-side template to use instead of `body`.
-    context: values for {{context.key}} placeholders in the body/template.
+    template: email template ID (tpl_..., from the web app's Templates page) or name, or an SMS template name, to use
+        instead of `body`.
+    context: values for the {{ context.key }} placeholders, keyed by the part after `context.` (e.g. {"name": "Ana"}).
     provider: which connected provider to use (see list_providers).
     app: push only. Which named Pushover app to send from.
     email_type: 'txt' (default) or 'html'.

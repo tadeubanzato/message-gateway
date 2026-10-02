@@ -40,9 +40,11 @@ You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (runn
 
 Paste this into Claude Code, Codex CLI or any agent with shell access:
 
-> Please install the message gateway. Instructions are at
-> `https://github.com/tadeubanzato/message-gateway/blob/main/llms.txt`. Fetch that
-> file and follow it.
+```bash
+Please install the message gateway.
+Instructions are at https://github.com/tadeubanzato/message-gateway/blob/main/llms.txt.
+Fetch that file and follow it.
+```
 
 The agent downloads the project, installs it, and opens the setup page in your browser.
 (It needs an agent that can run shell commands; chat-only apps can't.)
@@ -237,7 +239,7 @@ curl -X POST http://localhost:8010/v1/messages/push \
 Each channel has its own endpoint: `POST /v1/messages/push`, `/v1/messages/email`,
 `/v1/messages/sms`, `/v1/messages/telegram`, `/v1/messages/whatsapp`. Email and SMS also have a
 `/template` variant (e.g. `/v1/messages/sms/template`) for saved templates - push, Telegram and
-WhatsApp don't use templates, just send `body` directly. The API reference at `/scalar` documents
+WhatsApp don't use templates, just send `body` directly. The API reference at `/api/docs` documents
 each one.
 
 | Channel | Fields |
@@ -256,35 +258,54 @@ Every channel also accepts:
 
 ### Templates (email and SMS)
 
-Templates are plain files you keep in `app/templates/email/` (`<name>.txt` and/or `<name>.html`) and
-`app/templates/sms/` (`<name>.txt`). A template uses `{{ context.key }}` placeholders:
+A template is a message body with `{{ context.key }}` placeholders. Your app sends the template plus a
+`context` object with the values for that recipient, and the gateway fills them in.
 
-```
-Hi {{ context.name }}, welcome! Your account is now active.
+**Email templates are built in the web app.** Open **Templates** in the top menu (administrators, once
+Email is set up), paste or upload your HTML, edit it right in the preview, and select any text to turn
+it into a placeholder (for example "Carlos" into `{{ context.name }}`). Every saved template gets an
+**ID** like `tpl_1a2b3c4d5e6f`, and the page shows the exact JSON (or `curl`) to send:
+
+```json
+{
+  "to": "ana@example.com",
+  "subject": "Welcome, {{ context.name }}",
+  "template": "tpl_1a2b3c4d5e6f",
+  "emailType": "html",
+  "context": { "name": "Ana" }
+}
 ```
 
-Send it by name, with the values in `context`:
+Ana receives the subject `Welcome, Ana` and the template's HTML with her name filled in.
+
+- **Placeholder format**: it must start with `context.`; spaces inside the braces are optional
+  (`{{ context.name }}` and `{{context.name}}` both work). In the JSON, the `context` key is what follows
+  `context.` (`name`), not `context.name`. A bare `{{ name }}` is never filled in.
+- **`template`** is the ID or the template's name. `emailType` picks the body (`html` or `txt`), so give a
+  template both if you send both. Placeholders also work in `subject`.
+- **Look up IDs from code**: `GET /v1/templates/email` lists every template with its ID and the `context`
+  keys it needs; `GET /v1/templates/email/{template}` returns one, with a ready-to-send example request.
+  Both need your API key and are in the API reference (`/api/docs`) under **Templates**.
+- **Storage**: saved templates live in your gateway database (SQLite or MongoDB, whichever you set up), so
+  they move with the rest of your data when you switch or export it. A saved name wins over a built-in file
+  of the same name.
+- **Built-in file templates** still work, sent by name: `app/templates/email/<name>.txt|.html` (they have no
+  ID) and `app/templates/sms/<name>.txt`. Those folders are mounted into the container, so new files are picked
+  up without a rebuild. SMS templates are files only for now:
 
 ```json
 { "to": "+15551234567", "template": "welcome", "context": { "name": "Ana" } }
 ```
 
-Ana receives: `Hi Ana, welcome! Your account is now active.`
-
-For email, the same idea with a subject (placeholders work there too):
-
-```json
-{ "to": "ana@example.com", "subject": "Welcome, {{ context.name }}", "template": "welcome", "context": { "name": "Ana" } }
-```
-
-Ana receives the subject `Welcome, Ana` and the `welcome.txt` body with her name filled in. Add
-`"emailType": "html"` to use `welcome.html` instead.
-
-- **Email**: `emailType` picks the file (`html` uses `<name>.html`, otherwise `<name>.txt`), so provide
-  both files if you send both. Placeholders also work in `subject`.
 - **Strict by default**: a placeholder with no value in `context` returns a 400. Set
-  `TEMPLATE_STRICT=false` to fill it with an empty string instead. An unknown template name is a 400.
-- The folders are mounted into the container, so new templates are picked up without a rebuild.
+  `TEMPLATE_STRICT=false` to fill it with an empty string instead. An unknown template is a 400.
+- **Values are made HTML-safe for you** (HTML email only). Send plain text, with line breaks as `\n`, or text that is
+  already escaped with `<br>` tags; the gateway escapes `& < >` and turns line breaks into `<br>` without
+  double-escaping. Basic formatting is kept: `<br>`, `<hr>`, `<b>`/`<strong>`, `<i>`/`<em>`, `<u>`, `<s>`, `<code>`, `<pre>`,
+  `<p>`, `<blockquote>`, `<h1>`-`<h4>`, `<sub>`, `<sup>`, `<small>`, lists (`<ul>`/`<ol>`/`<li>`) and `<a>` with an
+  `http(s)`/`mailto` link. Names like `<bold>`, `<italic>`, `<underline>` and `<bullets>` are mapped to the real tag.
+  Any other tag (`<script>`, `<div>`, `<style>`, `<mark>`) is shown as text. A key ending in `_html` (for example
+  `table_html`) is trusted and inserted as is. Subjects and text emails are never escaped.
 - Push, Telegram and WhatsApp don't use templates; send `body` directly.
 
 `to` may be a list. If nothing is connected for the channel, the API answers immediately with
@@ -403,7 +424,7 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
 | "Port 8010 is already in use" | `MG_PORT=9000 ./install.sh` |
 | Setup page doesn't open | Open `http://localhost:8010` yourself |
 | Red banner: "not on a persistent volume" | You started it without `install.sh`; use `./install.sh` so data survives |
-| "N saved credentials can't be read" | The encryption key changed (volume replaced); enter them again on the Channels pages. Old API keys may need re-creating |
+| "N saved credentials can't be read", or a red banner about encryption keys | The encryption key changed (volume replaced, or another install with its own key shares this database). Put the original key in `.env` (see **Keeping your credentials readable**), or enter them again on the Channels pages. Old API keys may need re-creating |
 | A send returns "No … provider is connected" | The administrator connects one under Channels |
 | A send returns "… is turned off on the gateway" | That provider is connected but switched off - click its Enabled/Disabled pill on the Channels page to turn it back on, or pick a different connected provider with `"provider"` |
 | Mail is rejected | The sender address must be verified with Mailjet/SendGrid |
@@ -430,9 +451,33 @@ reverse proxy or tunnel that doesn't forward the original address, so the gatewa
 its own internal one, set it once in **Settings → Public address** (or `PUBLIC_BASE_URL` in
 `.env` for a locked-down install).
 
+### Keeping your credentials readable
+
+Provider credentials (and other settings) are saved in your database, **encrypted**. The key that encrypts
+them is *not* in the database: it is generated on first start and kept in this install's data volume
+(`bootstrap.json`), next to a second secret that hashes your API tokens. If the volume is replaced while the
+database is kept (a rebuild from another folder, `docker compose down -v`), or a second install shares the
+same database with its own keys, the saved credentials can't be read and old API tokens are rejected.
+
+The gateway now tells you: a red banner for administrators on every page, a warning in the container log at
+startup, and **Settings > Encryption keys**, which shows short fingerprints (so you can compare installs),
+which saved settings can't be read, and buttons to remove them once you've entered the credentials again.
+
+To make this impossible after a rebuild, **pin the keys** on each server:
+
+```bash
+docker compose exec gateway python -m app.keys      # prints SETTINGS_ENCRYPTION_KEY=... and TOKEN_HMAC_SECRET=...
+# paste both lines into .env (next to docker-compose.yml), then:
+docker compose up -d --force-recreate
+```
+
+- Treat those two values like passwords, and back them up. Anyone with the database *and* the key can read the credentials.
+- Don't point two installs at one database unless they use the same pinned keys; whichever saved last would otherwise make the other's credentials unreadable.
+- If you use MongoDB Atlas on a server, also consider setting `MONGODB_URI` in `.env` instead of leaving the connection string in the data volume's `bootstrap.json`.
+
 ### API documentation
 
-The API reference is at **`http://localhost:8010/scalar`** (also linked from the **About** page). Click
+The API reference is at **`http://localhost:8010/api/docs`** (also linked from the **About** page). Click
 **Authenticate** to enter your user key and API token, then use **Test Request** on the send endpoint.
 
 ### Architecture

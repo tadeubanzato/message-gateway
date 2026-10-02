@@ -6,7 +6,32 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [0.2.0] - Unreleased
 
+### Changed
+- **The API reference moved to `/api/docs`** (its OpenAPI file to `/api/openapi.json`). `/scalar` and `/docs`
+  are gone, so there is one place for the API documentation.
+
+### Fixed
+- **`context` values are made HTML-safe by the gateway** in HTML emails. Plain text is escaped and line breaks become
+  `<br>`; text an upstream tool already escaped is not double-escaped; only simple formatting tags and safe links survive.
+  A key ending in `_html` is inserted as is. Callers no longer need to escape anything.
+- **The template builder's yellow placeholder highlight no longer leaks into sent emails.** Chrome's editor could copy it
+  onto ordinary text as inline styles. It is now stripped when the page saves, when the gateway stores a template, and
+  when a template is rendered, so templates saved earlier are cleaned without re-saving.
+
 ### Added
+- **Warning when the encryption keys don't match the database.** Saved credentials are encrypted with a key kept
+  in the data volume; if the volume is replaced, or another install shares the database with its own key, they
+  silently looked "not set up". Now there is a banner for administrators on every page, a startup log warning, and
+  **Settings > Encryption keys** (fingerprints, which settings can't be read, remove them once re-entered, dismiss
+  the API-token warning). `docker compose exec gateway python -m app.keys` prints the keys to pin in `.env`.
+  Documented in the README ("Keeping your credentials readable").
+- **Email template builder** (Templates in the top menu, administrators, once Email is set up): paste
+  or upload HTML (or text), edit it right in the preview, select any text to turn it into a
+  `{{ context.name }}` placeholder, and see the request payload your app should send. Each saved template gets an ID (`tpl_...`); the
+  sending app passes it as `template` with `context`. `template` also still accepts a name.
+  `GET /v1/templates/email` and `GET /v1/templates/email/{template}` (now in the API reference under
+  **Templates**, with the other lookup) list the IDs and the context keys each needs, with an example request. Templates are saved in the database (SQLite or MongoDB),
+  so they move with the rest of your data.
 - **Several recipients in one string.** `to` accepts `"a@x.com, b@x.com"` (separated by commas, semicolons or new lines)
   as well as a list, on every channel: email, SMS, Telegram and WhatsApp. Each recipient still gets its own message.
 - **Per-channel send endpoints** in the API reference, grouped Email / SMS / Push: plain and template

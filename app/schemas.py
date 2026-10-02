@@ -126,11 +126,15 @@ class MessageRequest(BaseModel):
 
 
 _PROVIDER_DESC = "Which connected provider to use. Default: the channel's default provider."
-_EMAIL_TEMPLATE_DESC = ("Name of a saved email template, e.g. `welcome`. Loads `<name>.txt`, or `<name>.html` when "
-                        "`emailType` is `html`, from `app/templates/email/`.")
+_EMAIL_TEMPLATE_DESC = ("ID (e.g. `tpl_1a2b3c4d5e6f`, shown in the web app's Templates page) or name of an email "
+                        "template. Loads its `.txt` body, or its `.html` body when `emailType` is `html`.")
 _SMS_TEMPLATE_DESC = "Name of a saved SMS template, e.g. `welcome`. Loads `<name>.txt` from `app/templates/sms/`."
-_CONTEXT_DESC = ("Values for the `{{ context.key }}` placeholders in the template. "
-                 "A placeholder with no matching key makes the request fail with a 400.")
+_CONTEXT_DESC = ("Values for the `{{ context.key }}` placeholders in the template, keyed by the part after `context.` "
+                 "(`{{ context.name }}` -> `{\"name\": \"Ana\"}`). Spaces inside the braces are optional; the `context.` "
+                 "prefix is required. A placeholder with no matching key makes the request fail with a 400. In an HTML email "
+                 "each value is made HTML-safe by the gateway: send plain text (line breaks become `<br>`), already-escaped "
+                 "text, or basic HTML (`<br>`, `<b>`/`<bold>`, `<i>`/`<italic>`, `<u>`, lists, `<a href>`); other tags show "
+                 "as text. A key ending in `_html` is inserted as is.")
 
 
 class _ChannelMessage(BaseModel):
@@ -156,7 +160,7 @@ class EmailTemplateMessage(_ChannelMessage):
     subject: str = Field(description="Subject line. May contain `{{ context.key }}` placeholders.")
     template: str = Field(description=_EMAIL_TEMPLATE_DESC)
     context: dict[str, Any] = Field(default_factory=dict, description=_CONTEXT_DESC)
-    emailType: EmailType = Field("txt", description="`txt` (default) loads `<name>.txt`; `html` loads `<name>.html`.")
+    emailType: EmailType = Field("txt", description="`txt` (default) uses the template's plain-text body; `html` uses its HTML body.")
     provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `sendgrid`, `mailjet` (only the ones connected in the web app work).")
 
 

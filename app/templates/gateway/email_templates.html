@@ -1,0 +1,367 @@
+{% extends "gateway/base.html" %}
+{% block title %}Message Gateway - Templates{% endblock %}
+{% block content %}
+<p class="muted"><a href="/gateway">← Home</a></p>
+<h1 style="margin:0">Templates</h1>
+<div class="seg" style="margin:8px 0"><button type="button" class="on">Email</button></div>
+<p class="sub">Paste or upload your email, then <b>select any text in the preview and turn it into a placeholder</b> (e.g. "Carlos" → <code>{{ '{{ context.name }}' }}</code>). Your app sends the template ID plus a <code>context</code> with each recipient's values.</p>
+
+<div id="flash"></div>
+<div class="tpl-list" id="list"></div>
+
+<div class="tpl-head">
+  <label class="tpl-name">Template name
+    <input id="name" placeholder="e.g. welcome" maxlength="64" autocomplete="off" />
+  </label>
+  <div class="tpl-actions">
+    <button type="button" class="btn ghost" id="newBtn">New template</button>
+  </div>
+</div>
+
+<div class="tpl-grid">
+  <section class="card tpl-main" id="main">
+    <div class="tpl-tools">
+      <label class="btn sm ghost tpl-upload">Upload file<input id="file" type="file" accept=".html,.htm,.txt,text/html,text/plain" hidden /></label>
+      <div class="seg" role="tablist" aria-label="Format">
+        <button type="button" class="on" data-fmt="html">HTML</button>
+        <button type="button" data-fmt="txt">Plain text</button>
+      </div>
+      <span class="tpl-spacer"></span>
+      <div class="seg" aria-label="Mode">
+        <button type="button" class="on" data-mode="edit">Edit</button>
+        <button type="button" data-mode="preview">Preview</button>
+      </div>
+    </div>
+    <p class="muted" id="modeHint" style="margin:6px 0 10px"></p>
+
+    <div id="htmlPane">
+      <div class="tpl-frame"><iframe id="frame" sandbox="allow-same-origin" title="Email preview" style="width:100%"></iframe></div>
+      <details class="tpl-src"><summary>HTML source</summary>
+        <textarea id="src" class="code" spellcheck="false" rows="14" placeholder="Paste your email HTML here…"></textarea>
+      </details>
+    </div>
+    <div id="txtPane" hidden>
+      <textarea id="txtCode" class="code" spellcheck="false" rows="16" placeholder="Plain-text version (optional, used when emailType is txt)…"></textarea>
+      <pre id="txtPrev" class="tpl-txt"></pre>
+    </div>
+
+    <div class="actions tpl-save">
+      <button type="button" class="btn" id="saveBtn">Save</button>
+      <button type="button" class="btn danger" id="delBtn" hidden>Delete</button>
+    </div>
+
+    <div id="pop" class="tpl-pop" hidden>
+      <div id="popNew">
+        <div class="muted" style="margin-bottom:6px">Make this a placeholder</div>
+        <div class="row" style="flex-wrap:nowrap">
+          <input id="popKey" list="keyList" placeholder="name" autocomplete="off" style="width:150px" />
+          <button type="button" class="btn sm" id="popApply">Apply</button>
+        </div>
+        <datalist id="keyList"></datalist>
+      </div>
+      <div id="popOld" hidden>
+        <div class="muted" style="margin-bottom:6px">Placeholder <code id="popOldKey"></code></div>
+        <button type="button" class="btn sm ghost" id="popRevert">Turn back into text</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="tpl-side">
+    <div class="card tpl-id" id="idBox">
+      <div class="row between"><span>Template ID <code id="idVal"></code></span><button type="button" class="btn sm ghost" id="copyId">Copy ID</button></div>
+      <p class="muted" style="margin:8px 0 6px">Your app sends this with each recipient's values. It's built from the placeholders in your template and updates as you edit.</p>
+      <label class="tpl-name" style="max-width:none">Subject (example)
+        <input id="subj" placeholder="Welcome, {{ '{{ context.name }}' }}" autocomplete="off" />
+      </label>
+      <div class="row between" style="margin-top:10px">
+        <div class="seg" aria-label="Request format"><button type="button" class="on" data-req="json">JSON</button><button type="button" data-req="curl">curl</button></div>
+        <button type="button" class="btn sm ghost" id="copyReq">Copy</button>
+      </div>
+      <pre id="snippet" class="tpl-txt" style="min-height:0"></pre>
+      <div id="badPh" class="msg err" hidden style="margin-top:8px"></div>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}
+<script id="data" type="application/json">{{ payload | tojson }}</script>
+<script>
+{% raw %}
+(function () {
+  const D = JSON.parse(document.getElementById("data").textContent);
+  const $ = (s) => document.querySelector(s);
+  const { say } = window.MG;
+  const TOKEN = /\{\{(?:\s|&nbsp;)*context\.([A-Za-z0-9_]+)(?:\s|&nbsp;)*\}\}/g;
+  const KEY = /^[A-Za-z0-9_]+$/;
+  const cleanKey = (k) => (k || "").trim().replace(/^\{*\s*context\./, "").replace(/\s*\}*$/, "");
+  const BASE = D.base_url, USER_KEY = D.user_key, state = { req: "json", fmt: "html", mode: "edit", html: "", txt: "", samples: {}, loaded: null, id: null, templates: D.templates, range: null };
+  const frame = $("#frame");
+
+  const keysOf = (t) => Array.from(new Set(Array.from((t || "").matchAll(TOKEN), m => m[1]))).sort();
+  const allKeys = () => Array.from(new Set(keysOf(state.html).concat(keysOf(state.txt)))).sort();
+  const fill = (t) => (t || "").replace(TOKEN, (_, k) => state.samples[k] ? state.samples[k] : "{{ context." + k + " }}");
+  const tok = (k) => "{{ context." + k + " }}";
+  const flash = (t, kind) => say($("#flash"), t, kind);
+
+  async function api(path, body) {
+    const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (r.status === 401) { window.location = "/gateway/login"; throw new Error("Please log in again."); }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "Request failed.");
+    return j;
+  }
+
+  // ---------------- the preview iframe (same-origin, no scripts: only this page touches it) ----------------
+  const EDIT_CSS = "<style data-mg>[data-mg-ph]{background:#fff3bf;outline:1px dashed #c99a00;border-radius:3px;color:#000}body{cursor:text}</style>";
+  let reloadTimer = null, suppress = false, touched = false;
+
+  function loadFrame() {
+    hidePop();
+    const editing = state.mode === "edit";
+    let html = state.html.trim() ? (editing ? state.html : fill(state.html)) : "<p style='font:14px sans-serif;color:#888;padding:16px'>Paste or upload your email HTML below, or write it in “HTML source”.</p>";
+    if (editing && state.html.trim()) html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, m => m + EDIT_CSS) : EDIT_CSS + html;
+    frame.onload = () => { if (editing && state.html.trim()) setupEditing(); };
+    frame.srcdoc = html;
+  }
+
+  function wrapTokens(doc) {
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => /^(SCRIPT|STYLE)$/.test(n.parentNode.nodeName) || n.parentNode.hasAttribute("data-mg-ph") ? NodeFilter.FILTER_REJECT : (new RegExp(TOKEN.source).test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP)
+    });
+    const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(n => {
+      const frag = doc.createDocumentFragment(); let last = 0; const text = n.nodeValue;
+      for (const m of text.matchAll(TOKEN)) {
+        if (m.index > last) frag.appendChild(doc.createTextNode(text.slice(last, m.index)));
+        frag.appendChild(phSpan(doc, m[1])); last = m.index + m[0].length;
+      }
+      if (last < text.length) frag.appendChild(doc.createTextNode(text.slice(last)));
+      n.parentNode.replaceChild(frag, n);
+    });
+  }
+  function phSpan(doc, key) { const s = doc.createElement("span"); s.setAttribute("data-mg-ph", key); s.textContent = tok(key); return s; }
+
+  function serialize(doc) {
+    const c = doc.documentElement.cloneNode(true);
+    c.querySelectorAll("style[data-mg]").forEach(n => n.remove());
+    c.querySelectorAll("[data-mg-ph]").forEach(n => n.replaceWith(doc.createTextNode(n.textContent)));
+    c.querySelectorAll("[contenteditable]").forEach(n => n.removeAttribute("contenteditable"));
+    // Chrome can copy the placeholder highlight onto ordinary text as inline styles: never save it
+    c.querySelectorAll("[style]").forEach(n => {
+      const st = n.style, hl = /255,\s*243,\s*191|fff3bf/i.test(st.backgroundColor + st.background) || /201,\s*154,\s*0|c99a00/i.test(st.outline + st.outlineColor);
+      if (!hl) return;
+      ["background", "backgroundColor", "outline", "outlineColor", "outlineStyle", "outlineWidth", "borderRadius"].forEach(p => { st[p] = ""; });
+      if (/^rgb\(0,\s*0,\s*0\)$/.test(st.color)) st.color = "";
+      if (!n.getAttribute("style")) n.removeAttribute("style");
+    });
+    // typing in the editor turns spaces into non-breaking ones: save every placeholder as plain {{ context.key }}
+    const w = doc.createTreeWalker(c, NodeFilter.SHOW_TEXT), texts = [];
+    while (w.nextNode()) texts.push(w.currentNode);
+    texts.forEach(n => { if (TOKEN.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(TOKEN, (_, k) => tok(k)); TOKEN.lastIndex = 0; });
+    return (doc.doctype ? "<!doctype html>\n" : "") + c.outerHTML;
+  }
+
+  function setupEditing() {
+    const doc = frame.contentDocument; if (!doc || !doc.body) return;
+    touched = false;
+    try { wrapTokens(doc); } catch (e) { console.error("template editor: could not highlight placeholders", e); }
+    doc.body.contentEditable = "true";
+    doc.addEventListener("mousedown", hidePop);
+    doc.addEventListener("keydown", hidePop);
+    doc.addEventListener("mouseup", () => setTimeout(checkSelection, 0));
+    doc.addEventListener("keyup", (e) => { if (e.shiftKey || e.key.startsWith("Arrow")) checkSelection(); });
+    doc.addEventListener("input", onFrameEdit);
+    frame.contentWindow.addEventListener("blur", () => { wrapTokens(doc); });
+    doc.addEventListener("click", e => { if (e.target.closest && e.target.closest("a")) e.preventDefault(); });
+  }
+
+  // Safety net that does not depend on the browser's editing events: while the preview has focus,
+  // re-read it a few times a second, and always before saving.
+  function syncFromFrame(force) {
+    if (state.fmt !== "html" || state.mode !== "edit") return;
+    const doc = frame.contentDocument;
+    if (!doc || !doc.body || !doc.body.isContentEditable) return;
+    if (doc.hasFocus()) touched = true;
+    if (!touched && !force) return;
+    const html = serialize(doc);
+    if (html !== state.html) onFrameEdit();
+  }
+  setInterval(syncFromFrame, 600);
+
+  function onFrameEdit() {
+    const doc = frame.contentDocument; if (!doc) return;
+    // a placeholder span whose text was typed over is no longer a placeholder
+    doc.querySelectorAll("[data-mg-ph]").forEach(s => { if (s.textContent !== tok(s.getAttribute("data-mg-ph"))) s.replaceWith(doc.createTextNode(s.textContent)); });
+    state.html = serialize(doc);
+    suppress = true; $("#src").value = state.html; suppress = false;
+    renderSide();
+  }
+
+  // ---------------- "select text -> make a placeholder" ----------------
+  const pop = $("#pop");
+  function hidePop() { pop.hidden = true; }
+  function checkSelection() {
+    const doc = frame.contentDocument; if (!doc) return;
+    const sel = doc.getSelection();
+    if (!sel || !sel.rangeCount) return hidePop();
+    const range = sel.getRangeAt(0);
+    state.range = range.cloneRange();
+    const inPh = (n) => n && (n.nodeType === 1 ? n : n.parentNode).closest && (n.nodeType === 1 ? n : n.parentNode).closest("[data-mg-ph]");
+    const ph = inPh(range.startContainer) || inPh(range.endContainer);
+    if (range.collapsed && !ph) return hidePop();
+    $("#popNew").hidden = !!ph; $("#popOld").hidden = !ph;
+    if (ph) { $("#popOldKey").textContent = ph.getAttribute("data-mg-ph"); pop.dataset.target = "ph"; state.phEl = ph; }
+    else { state.phEl = null; $("#popKey").value = ""; }
+    const fr = frame.getBoundingClientRect(), mr = $("#main").getBoundingClientRect(), rr = range.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(fr.left - mr.left + rr.left, mr.width - 280)) + "px";
+    pop.style.top = (fr.top - mr.top + rr.bottom + 8) + "px";
+    pop.hidden = false;
+    if (!ph) setTimeout(() => $("#popKey").focus(), 0);
+  }
+
+  function applyPlaceholder(key) {
+    key = cleanKey(key);
+    if (!KEY.test(key)) { flash("A placeholder name can use letters, numbers and underscore only.", "err"); return; }
+    const doc = frame.contentDocument, range = state.range; if (!doc || !range) return;
+    const sampleText = range.toString().trim();
+    if (sampleText && !state.samples[key]) state.samples[key] = sampleText;   // the replaced text becomes the preview sample
+    range.deleteContents();
+    const span = phSpan(doc, key); range.insertNode(span);
+    doc.getSelection().removeAllRanges();
+    hidePop(); state.range = null; $("#flash").innerHTML = "";
+    onFrameEdit();
+  }
+  $("#popApply").onclick = () => applyPlaceholder($("#popKey").value);
+  $("#popKey").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); applyPlaceholder($("#popKey").value); } });
+  $("#popRevert").onclick = () => {
+    const doc = frame.contentDocument, ph = state.phEl; if (!doc || !ph) return;
+    const k = ph.getAttribute("data-mg-ph");
+    ph.replaceWith(doc.createTextNode(state.samples[k] || k)); hidePop(); onFrameEdit();
+  };
+
+  // ---------------- side panel ----------------
+  function renderSide() {
+    const keys = allKeys();
+    $("#keyList").innerHTML = keys.map(k => "<option value=\"" + k + "\">").join("");
+    renderId();
+  }
+  // Same pattern the server fills; anything else inside {{ }} (like {{ name }}) is left as-is by the server.
+  function badPlaceholders() {
+    const found = new Set();
+    [state.html, state.txt, $("#subj").value].forEach(t => (t || "").replace(/\{\{[^{}]*\}\}/g, m => { if (!new RegExp("^" + TOKEN.source + "$").test(m)) found.add(m); }));
+    return Array.from(found);
+  }
+  // The ID once saved; a built-in template is sent by name; a new one gets its ID on first save.
+  const templateRef = () => state.id || state.loaded || "(assigned when you save)";
+  function requestBody() {
+    const keys = Array.from(new Set(allKeys().concat(keysOf($("#subj").value)))).sort();
+    const context = {}; keys.forEach(k => context[k] = state.samples[k] || k);
+    return { to: "ana@example.com", subject: $("#subj").value || $("#name").value || "Subject", template: templateRef(),
+             emailType: state.html.trim() ? "html" : "txt", context };
+  }
+  function requestText() {
+    const body = requestBody();
+    if (state.req === "json") return JSON.stringify(body, null, 2);
+    return "curl -X POST " + BASE + "/v1/messages/email/template \\\n  -H 'Content-Type: application/json' \\\n  -H 'X-User-Key: " + USER_KEY +
+      "' \\\n  -H 'X-API-Token: YOUR_API_TOKEN' \\\n  -d '" + JSON.stringify(body, null, 2).replace(/'/g, "'\\''") + "'";
+  }
+  function renderId() {
+    $("#idVal").textContent = state.id || (state.loaded ? "none (built-in, sent by name)" : "assigned when you save");
+    $("#copyId").hidden = !state.id;
+    $("#snippet").textContent = requestText();
+    const bad = badPlaceholders(), box = $("#badPh");
+    box.hidden = !bad.length;
+    if (bad.length) box.textContent = "These won't be filled in. Every placeholder must start with context. (spaces optional): " +
+      bad.map(b => { const n = b.replace(/^\{\{\s*(?:context\.)?/, "").replace(/\s*\}\}$/, ""); return b + (/^[A-Za-z0-9_]+$/.test(n) ? " → {{ context." + n + " }}" : ""); }).join(", ");
+  }
+  function renderTxtPrev() { $("#txtPrev").textContent = state.txt.trim() ? fill(state.txt) : "Nothing to preview yet."; }
+
+  function setFmt(f) {
+    state.fmt = f;
+    document.querySelectorAll("[data-fmt]").forEach(b => b.classList.toggle("on", b.dataset.fmt === f));
+    $("#htmlPane").hidden = f !== "html"; $("#txtPane").hidden = f !== "txt";
+    document.querySelectorAll("[data-mode]").forEach(b => b.hidden = f !== "html");
+    $("#modeHint").textContent = f === "html"
+      ? (state.mode === "edit" ? "Click to edit the text. Select words to turn them into a placeholder. Send with \"emailType\": \"html\"." : "This is how the email will look, with your sample values filled in. Switch to Edit to change it.")
+      : "Used when \"emailType\" is \"txt\" (the default).";
+    if (f === "html") loadFrame(); else { $("#txtCode").value = state.txt; renderTxtPrev(); }
+    hidePop();
+  }
+  function setMode(m) {
+    state.mode = m;
+    document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
+    setFmt(state.fmt);
+  }
+
+  function renderList() {
+    const box = $("#list"); box.innerHTML = "";
+    state.templates.forEach(t => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "chip" + (state.loaded === (t.id || t.name) ? " on" : "");
+      b.textContent = t.name + (t.source === "built-in" ? " (built-in)" : "");
+      b.title = t.keys.length ? "Placeholders: " + t.keys.join(", ") : "No placeholders";
+      b.onclick = () => open(t.id || t.name); box.appendChild(b);
+    });
+    const cur = state.templates.find(t => (t.id || t.name) === state.loaded);
+    $("#delBtn").hidden = !(cur && cur.id);
+    renderId();
+  }
+
+  async function open(ref) {
+    try {
+      const t = await api("/gateway/templates/email/item/" + encodeURIComponent(ref));
+      state.id = t.id; state.loaded = t.id || t.name; state.html = t.html; state.txt = t.txt; state.samples = {};
+      $("#name").value = t.name; $("#src").value = t.html;
+      state.mode = "edit"; document.querySelectorAll("[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === "edit"));
+      setFmt(t.html ? "html" : "txt"); renderSide(); renderList(); $("#flash").innerHTML = "";
+    } catch (e) { flash(e.message, "err"); }
+  }
+
+  // ---------------- wiring ----------------
+  document.querySelectorAll("[data-fmt]").forEach(b => b.onclick = () => setFmt(b.dataset.fmt));
+  document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+  $("#src").addEventListener("input", () => {
+    if (suppress) return;
+    state.html = $("#src").value; renderSide();
+    clearTimeout(reloadTimer); reloadTimer = setTimeout(loadFrame, 350);
+  });
+  $("#txtCode").addEventListener("input", () => { state.txt = $("#txtCode").value; renderSide(); renderTxtPrev(); });
+  $("#file").onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const text = await f.text(), isTxt = /\.txt$/i.test(f.name);
+    if (!$("#name").value.trim()) $("#name").value = f.name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 64);
+    if (isTxt) state.txt = text; else { state.html = text; $("#src").value = text; }
+    setFmt(isTxt ? "txt" : "html"); renderSide(); e.target.value = "";
+  };
+  $("#newBtn").onclick = () => {
+    state.loaded = null; state.id = null; state.html = ""; state.txt = ""; state.samples = {}; $("#name").value = ""; $("#src").value = "";
+    setMode("edit"); setFmt("html"); renderSide(); renderList(); $("#flash").innerHTML = "";
+  };
+  $("#saveBtn").onclick = async () => {
+    try {
+      syncFromFrame();
+      const name = $("#name").value.trim();
+      const r = await api("/gateway/templates/email/save", { id: state.id, name, html: state.html, txt: state.txt });
+      state.templates = r.templates; state.id = r.template.id; state.loaded = state.id; renderList();
+      flash("Saved. Template ID: " + state.id + (allKeys().length ? ". Send it with context " + allKeys().join(", ") : "") + ".", "ok");
+    } catch (e) { flash(e.message, "err"); }
+  };
+  $("#delBtn").onclick = async () => {
+    if (!state.id || !confirm("Delete this template (" + $("#name").value + ")? Apps still sending its ID will get an error.")) return;
+    try {
+      const r = await api("/gateway/templates/email/delete", { id: state.id });
+      state.templates = r.templates; $("#newBtn").click(); flash("Deleted.", "ok");
+    } catch (e) { flash(e.message, "err"); }
+  };
+  document.querySelectorAll("[data-req]").forEach(b => b.onclick = () => {
+    state.req = b.dataset.req;
+    document.querySelectorAll("[data-req]").forEach(x => x.classList.toggle("on", x === b)); renderId();
+  });
+  $("#subj").addEventListener("input", renderId);
+  $("#copyReq").onclick = () => { syncFromFrame(); navigator.clipboard && navigator.clipboard.writeText($("#snippet").textContent); $("#copyReq").textContent = "Copied"; setTimeout(() => $("#copyReq").textContent = "Copy", 1500); };
+  $("#copyId").onclick = () => { navigator.clipboard && navigator.clipboard.writeText(state.id || ""); $("#copyId").textContent = "Copied"; setTimeout(() => $("#copyId").textContent = "Copy ID", 1500); };
+
+  renderList(); setFmt("html"); renderSide();
+})();
+{% endraw %}
+</script>
+{% endblock %}

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import os
 import re
 import time
 import urllib.request
@@ -33,6 +35,7 @@ JWT_HEADER = "Cf-Access-Jwt-Assertion"
 _TEAM_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.cloudflareaccess\.com$")
 _KEYS_TTL = 3600
 _LEEWAY = 60
+log = logging.getLogger("uvicorn.error")
 _keys_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
@@ -61,9 +64,15 @@ def settings() -> dict[str, Any]:
     }
 
 
+def disabled_by_env() -> bool:
+    """Emergency switch: CF_ACCESS_DISABLE=1 in .env turns Cloudflare Access sign-in off and
+    brings password login back, in case the settings ever lock the administrator out."""
+    return (os.environ.get("CF_ACCESS_DISABLE") or "").strip().lower() in ("1", "true", "yes")
+
+
 def is_active() -> bool:
     s = settings()
-    return s["enabled"] and valid_team(s["team"]) and bool(s["aud"])
+    return s["enabled"] and valid_team(s["team"]) and bool(s["aud"]) and not disabled_by_env()
 
 
 def password_login_allowed() -> bool:
@@ -127,13 +136,26 @@ def verify(token: str, team: str, aud: str) -> dict[str, Any]:
     return claims
 
 
+def check_request(token: Optional[str]) -> tuple[Optional[str], str]:
+    """(email, "") when Cloudflare Access signed the person in, else (None, why-not).
+    The reason is also logged, so a refused sign-in can be diagnosed."""
+    if not is_active():
+        return None, ""
+    if not token:
+        reason = "the request carried no Cf-Access-Jwt-Assertion header (is this path behind the Access application?)"
+    else:
+        s = settings()
+        try:
+            email = str(verify(token, s["team"], s["aud"]).get("email") or "").strip().lower()
+            if email:
+                return email, ""
+            reason = "the Access token has no email claim"
+        except AccessError as e:
+            reason = str(e)
+    log.warning("Cloudflare Access sign-in refused: %s", reason)
+    return None, reason
+
+
 def verified_email(token: Optional[str]) -> Optional[str]:
     """Email of the person Cloudflare Access authenticated, or None (also when SSO is off)."""
-    if not token or not is_active():
-        return None
-    s = settings()
-    try:
-        email = str(verify(token, s["team"], s["aud"]).get("email") or "").strip().lower()
-    except AccessError:
-        return None
-    return email or None
+    return check_request(token)[0]
