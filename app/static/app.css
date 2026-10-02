@@ -7,7 +7,7 @@
   --radius:12px; --shadow:0 1px 2px rgba(0,0,0,.05); --hover:#eef0f3;
 }
 @media (prefers-color-scheme: dark) {
-  /* Matches the Scalar API reference (/scalar): slate background, teal accent. */
+  /* Matches the Scalar API reference (/api/docs): slate background, teal accent. */
   :root {
     --bg:#1f2128; --surface:#24262e; --hover:#282a34; --fg:#e9e9ea; --muted:#aaabad; --line:#36383e;
     --accent:#e9e9ea; --accent-fg:#1f2128; --link:#5cc9b8;
