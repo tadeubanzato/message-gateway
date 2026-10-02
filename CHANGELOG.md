@@ -11,7 +11,8 @@ project uses [Semantic Versioning](https://semver.org/).
   or upload HTML (or text), edit it right in the preview, select any text to turn it into a
   `{{ context.name }}` placeholder, and see the request payload your app should send. Each saved template gets an ID (`tpl_...`); the
   sending app passes it as `template` with `context`. `template` also still accepts a name.
-  `GET /v1/templates/email` lists the IDs and the context keys each needs. Templates are saved in the database (SQLite or MongoDB),
+  `GET /v1/templates/email` and `GET /v1/templates/email/{template}` (now in the API reference under
+  **Templates**, with the other lookup) list the IDs and the context keys each needs, with an example request. Templates are saved in the database (SQLite or MongoDB),
   so they move with the rest of your data.
 - **Per-channel send endpoints** in the API reference, grouped Email / SMS / Push: plain and template
   variants for email (`/v1/messages/email`, `/email/template`) and SMS (`/sms`, `/sms/template`), and

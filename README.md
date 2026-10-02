@@ -256,40 +256,47 @@ Every channel also accepts:
 
 ### Templates (email and SMS)
 
-Templates are plain files you keep in `app/templates/email/` (`<name>.txt` and/or `<name>.html`) and
-`app/templates/sms/` (`<name>.txt`). A template uses `{{ context.key }}` placeholders:
+A template is a message body with `{{ context.key }}` placeholders. Your app sends the template plus a
+`context` object with the values for that recipient, and the gateway fills them in.
 
-```
-Hi {{ context.name }}, welcome! Your account is now active.
+**Email templates are built in the web app.** Open **Templates** in the top menu (administrators, once
+Email is set up), paste or upload your HTML, edit it right in the preview, and select any text to turn
+it into a placeholder (for example "Carlos" into `{{ context.name }}`). Every saved template gets an
+**ID** like `tpl_1a2b3c4d5e6f`, and the page shows the exact JSON (or `curl`) to send:
+
+```json
+{
+  "to": "ana@example.com",
+  "subject": "Welcome, {{ context.name }}",
+  "template": "tpl_1a2b3c4d5e6f",
+  "emailType": "html",
+  "context": { "name": "Ana" }
+}
 ```
 
-Send it by name, with the values in `context`:
+Ana receives the subject `Welcome, Ana` and the template's HTML with her name filled in.
+
+- **Placeholder format**: it must start with `context.`; spaces inside the braces are optional
+  (`{{ context.name }}` and `{{context.name}}` both work). In the JSON, the `context` key is what follows
+  `context.` (`name`), not `context.name`. A bare `{{ name }}` is never filled in.
+- **`template`** is the ID or the template's name. `emailType` picks the body (`html` or `txt`), so give a
+  template both if you send both. Placeholders also work in `subject`.
+- **Look up IDs from code**: `GET /v1/templates/email` lists every template with its ID and the `context`
+  keys it needs; `GET /v1/templates/email/{template}` returns one, with a ready-to-send example request.
+  Both need your API key and are in the API reference (`/scalar`) under **Templates**.
+- **Storage**: saved templates live in your gateway database (SQLite or MongoDB, whichever you set up), so
+  they move with the rest of your data when you switch or export it. A saved name wins over a built-in file
+  of the same name.
+- **Built-in file templates** still work, sent by name: `app/templates/email/<name>.txt|.html` (they have no
+  ID) and `app/templates/sms/<name>.txt`. Those folders are mounted into the container, so new files are picked
+  up without a rebuild. SMS templates are files only for now:
 
 ```json
 { "to": "+15551234567", "template": "welcome", "context": { "name": "Ana" } }
 ```
 
-Ana receives: `Hi Ana, welcome! Your account is now active.`
-
-For email, the same idea with a subject (placeholders work there too):
-
-```json
-{ "to": "ana@example.com", "subject": "Welcome, {{ context.name }}", "template": "welcome", "context": { "name": "Ana" } }
-```
-
-Ana receives the subject `Welcome, Ana` and the `welcome.txt` body with her name filled in. Add
-`"emailType": "html"` to use `welcome.html` instead.
-
-- **Email**: `emailType` picks the file (`html` uses `<name>.html`, otherwise `<name>.txt`), so provide
-  both files if you send both. Placeholders also work in `subject`.
-- **Template builder (email)**: in the web app, Templates (top menu, once Email is set up)
-  lets an administrator paste or upload HTML, add placeholders and preview it. Every saved template has
-  an ID like `tpl_1a2b3c4d5e6f`; send it as `template` (the name works too) with `context` holding that
-  recipient's values. `GET /v1/templates/email` (API key) lists IDs and the context keys each needs.
-  Saved templates are stored in your gateway database (SQLite or MongoDB, whichever you set up), so they move with the rest of your data when you switch or export it. A saved name wins over a built-in file of the same name.
 - **Strict by default**: a placeholder with no value in `context` returns a 400. Set
-  `TEMPLATE_STRICT=false` to fill it with an empty string instead. An unknown template name is a 400.
-- The folders are mounted into the container, so new templates are picked up without a rebuild.
+  `TEMPLATE_STRICT=false` to fill it with an empty string instead. An unknown template is a 400.
 - Push, Telegram and WhatsApp don't use templates; send `body` directly.
 
 `to` may be a list. If nothing is connected for the channel, the API answers immediately with
