@@ -239,7 +239,7 @@ curl -X POST http://localhost:8010/v1/messages/push \
 Each channel has its own endpoint: `POST /v1/messages/push`, `/v1/messages/email`,
 `/v1/messages/sms`, `/v1/messages/telegram`, `/v1/messages/whatsapp`. Email and SMS also have a
 `/template` variant (e.g. `/v1/messages/sms/template`) for saved templates - push, Telegram and
-WhatsApp don't use templates, just send `body` directly. The API reference at `/scalar` documents
+WhatsApp don't use templates, just send `body` directly. The API reference at `/api/docs` documents
 each one.
 
 | Channel | Fields |
@@ -285,7 +285,7 @@ Ana receives the subject `Welcome, Ana` and the template's HTML with her name fi
   template both if you send both. Placeholders also work in `subject`.
 - **Look up IDs from code**: `GET /v1/templates/email` lists every template with its ID and the `context`
   keys it needs; `GET /v1/templates/email/{template}` returns one, with a ready-to-send example request.
-  Both need your API key and are in the API reference (`/scalar`) under **Templates**.
+  Both need your API key and are in the API reference (`/api/docs`) under **Templates**.
 - **Storage**: saved templates live in your gateway database (SQLite or MongoDB, whichever you set up), so
   they move with the rest of your data when you switch or export it. A saved name wins over a built-in file
   of the same name.
@@ -446,7 +446,7 @@ its own internal one, set it once in **Settings → Public address** (or `PUBLIC
 
 ### API documentation
 
-The API reference is at **`http://localhost:8010/scalar`** (also linked from the **About** page). Click
+The API reference is at **`http://localhost:8010/api/docs`** (also linked from the **About** page). Click
 **Authenticate** to enter your user key and API token, then use **Test Request** on the send endpoint.
 
 ### Architecture
