@@ -159,11 +159,35 @@ class Repository(ABC):
     def delete_setting(self, name: str) -> None:
         ...
 
+    # ---- email templates (saved from the web app's template builder) ----
+    @abstractmethod
+    def list_email_templates(self) -> list[dict[str, Any]]:
+        """Every saved template: {"_id": "tpl_...", "name", "html", "txt", "created_at", "updated_at"}."""
+        ...
+
+    @abstractmethod
+    def get_email_template(self, template_id: str) -> Optional[dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    def find_email_template_by_name(self, name: str) -> Optional[dict[str, Any]]:
+        ...
+
+    @abstractmethod
+    def save_email_template(self, doc: dict[str, Any]) -> None:
+        """Insert or replace the template with doc["_id"]. Names are unique
+        (raise DuplicateTemplateNameError on a clash with a different template)."""
+        ...
+
+    @abstractmethod
+    def delete_email_template(self, template_id: str) -> bool:
+        ...
+
     # ---- move data to another database (Settings > Database) ----
     @abstractmethod
     def export_data(self) -> dict[str, list[dict[str, Any]]]:
         """Everything needed to recreate this gateway elsewhere: accounts, portal_sessions,
-        messages, attempts, settings. Ids are preserved; message/attempt times are exported
+        messages, attempts, settings, email_templates. Ids are preserved; message/attempt times are exported
         as epoch seconds in "_created_at". Setting values stay encrypted."""
         ...
 
@@ -191,4 +215,8 @@ class DuplicateEmailError(Exception):
 
 
 class DuplicateUserKeyError(Exception):
+    pass
+
+
+class DuplicateTemplateNameError(Exception):
     pass

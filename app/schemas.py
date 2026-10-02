@@ -100,8 +100,8 @@ class MessageRequest(BaseModel):
 
 
 _PROVIDER_DESC = "Which connected provider to use. Default: the channel's default provider."
-_EMAIL_TEMPLATE_DESC = ("Name of a saved email template, e.g. `welcome`. Loads `<name>.txt`, or `<name>.html` when "
-                        "`emailType` is `html`, from `app/templates/email/`.")
+_EMAIL_TEMPLATE_DESC = ("ID (e.g. `tpl_1a2b3c4d5e6f`, shown in the web app's Templates page) or name of an email "
+                        "template. Loads its `.txt` body, or its `.html` body when `emailType` is `html`.")
 _SMS_TEMPLATE_DESC = "Name of a saved SMS template, e.g. `welcome`. Loads `<name>.txt` from `app/templates/sms/`."
 _CONTEXT_DESC = ("Values for the `{{ context.key }}` placeholders in the template. "
                  "A placeholder with no matching key makes the request fail with a 400.")
