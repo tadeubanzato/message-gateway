@@ -10,6 +10,14 @@ project uses [Semantic Versioning](https://semver.org/).
 - **The API reference moved to `/api/docs`** (its OpenAPI file to `/api/openapi.json`). `/scalar` and `/docs`
   are gone, so there is one place for the API documentation.
 
+### Fixed
+- **`context` values are made HTML-safe by the gateway** in HTML emails. Plain text is escaped and line breaks become
+  `<br>`; text an upstream tool already escaped is not double-escaped; only simple formatting tags and safe links survive.
+  A key ending in `_html` is inserted as is. Callers no longer need to escape anything.
+- **The template builder's yellow placeholder highlight no longer leaks into sent emails.** Chrome's editor could copy it
+  onto ordinary text as inline styles. It is now stripped when the page saves, when the gateway stores a template, and
+  when a template is rendered, so templates saved earlier are cleaned without re-saving.
+
 ### Added
 - **Warning when the encryption keys don't match the database.** Saved credentials are encrypted with a key kept
   in the data volume; if the volume is replaced, or another install shares the database with its own key, they

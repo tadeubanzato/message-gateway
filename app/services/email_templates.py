@@ -26,6 +26,44 @@ NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # `&nbsp;` too: typing spaces in the browser editor saves them as entities.
 CONTEXT_TOKEN_RE = re.compile(r"\{\{(?:\s|&nbsp;)*context\.([A-Za-z0-9_]+)(?:\s|&nbsp;)*\}\}")
 ID_RE = re.compile(r"^tpl_[0-9a-f]{12}$")
+
+# ---- guardrail: editor-only styling must never reach a sent email ----
+# The builder paints {{ context.x }} placeholders yellow while you edit. Chrome's editor can copy that
+# look onto ordinary text as inline styles, so we strip it on save and again when a template is read.
+_EDITOR_STYLE_TAG_RE = re.compile(r"<style\b[^>]*\bdata-mg\b[^>]*>.*?</style>", re.I | re.S)
+_EDITOR_SPAN_RE = re.compile(r"<span\b[^>]*\bdata-mg-ph\b[^>]*>(.*?)</span>", re.I | re.S)
+_EDITOR_ATTR_RE = re.compile(r"\s+(?:data-mg-ph|data-mg|contenteditable|spellcheck)(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+))?", re.I)
+_STYLE_ATTR_RE = re.compile(r"""(\s)style\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.I)
+_HIGHLIGHT_RE = re.compile(r"fff3bf|rgba?\(\s*255\s*,\s*243\s*,\s*191|c99a00|rgba?\(\s*201\s*,\s*154\s*,\s*0\b", re.I)
+_BLACK_RE = re.compile(r"^(?:#000(?:000)?|black|rgb\(\s*0\s*,\s*0\s*,\s*0\s*\))$", re.I)
+
+
+def _clean_style(m: "re.Match[str]") -> str:
+    style = m.group(2) if m.group(2) is not None else m.group(3)
+    decls = [d.strip() for d in style.split(";") if d.strip()]
+    props = [(d.split(":", 1)[0].strip().lower(), d.split(":", 1)[1].strip() if ":" in d else "") for d in decls]
+    if not any(p in ("background", "background-color", "outline", "outline-color") and _HIGHLIGHT_RE.search(v) for p, v in props):
+        return m.group(0)   # not the editor's highlight: leave the author's styling alone
+    kept = []
+    for d, (p, v) in zip(decls, props):
+        if p in ("background", "background-color", "outline", "outline-color") and _HIGHLIGHT_RE.search(v):
+            continue
+        if p.startswith("outline") or (p == "color" and _BLACK_RE.match(v)) or (p == "border-radius" and v == "3px"):
+            continue   # the other bits of the same editor highlight
+        kept.append(d)
+    return f'{m.group(1)}style="{"; ".join(kept)}"' if kept else ""
+
+
+def clean_editor_artifacts(html: str) -> str:
+    """Remove the web editor's placeholder highlight (marker spans, <style data-mg>, and any inline
+    yellow background/outline Chrome copied onto text) from template HTML."""
+    if not html:
+        return html
+    html = _EDITOR_STYLE_TAG_RE.sub("", html)
+    html = _EDITOR_SPAN_RE.sub(r"\1", html)
+    html = _EDITOR_ATTR_RE.sub("", html)
+    html = _STYLE_ATTR_RE.sub(_clean_style, html)
+    return re.sub(r"<span\s*>(.*?)</span>", r"\1", html, flags=re.S)
 EXTS = ("html", "txt")
 MAX_BYTES = 512 * 1024
 
@@ -118,7 +156,8 @@ def read(ref: str, ext: str) -> Optional[str]:
     _migrate_legacy_files()
     t = _saved_by_ref(ref)
     if t:
-        return t.get(ext) or None
+        text = t.get(ext) or None
+        return clean_editor_artifacts(text) if ext == "html" and text else text
     if ref in _builtin_names():
         return _read_file(os.path.join(_builtin_dir(), f"{ref}.{ext}"))
     return None
@@ -168,7 +207,7 @@ def save(tid: Optional[str], name: str, html: str, txt: str) -> dict[str, Any]:
         raise ValueError("Use letters, numbers, dot, dash or underscore (max 64) for the template name.")
     if ID_RE.match(name):
         raise ValueError("That name looks like a template ID; pick another.")
-    html, txt = html or "", txt or ""
+    html, txt = clean_editor_artifacts(html or ""), txt or ""
     if not html.strip() and not txt.strip():
         raise ValueError("Add an HTML or a text body before saving.")
     if len(html.encode("utf-8")) > MAX_BYTES or len(txt.encode("utf-8")) > MAX_BYTES:

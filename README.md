@@ -299,6 +299,13 @@ Ana receives the subject `Welcome, Ana` and the template's HTML with her name fi
 
 - **Strict by default**: a placeholder with no value in `context` returns a 400. Set
   `TEMPLATE_STRICT=false` to fill it with an empty string instead. An unknown template is a 400.
+- **Values are made HTML-safe for you** (HTML email only). Send plain text, with line breaks as `\n`, or text that is
+  already escaped with `<br>` tags; the gateway escapes `& < >` and turns line breaks into `<br>` without
+  double-escaping. Basic formatting is kept: `<br>`, `<hr>`, `<b>`/`<strong>`, `<i>`/`<em>`, `<u>`, `<s>`, `<code>`, `<pre>`,
+  `<p>`, `<blockquote>`, `<h1>`-`<h4>`, `<sub>`, `<sup>`, `<small>`, lists (`<ul>`/`<ol>`/`<li>`) and `<a>` with an
+  `http(s)`/`mailto` link. Names like `<bold>`, `<italic>`, `<underline>` and `<bullets>` are mapped to the real tag.
+  Any other tag (`<script>`, `<div>`, `<style>`, `<mark>`) is shown as text. A key ending in `_html` (for example
+  `table_html`) is trusted and inserted as is. Subjects and text emails are never escaped.
 - Push, Telegram and WhatsApp don't use templates; send `body` directly.
 
 `to` may be a list. If nothing is connected for the channel, the API answers immediately with
