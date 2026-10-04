@@ -26,7 +26,7 @@ from starlette.templating import Jinja2Templates
 from app import bootstrap
 from app.db import get_repository
 from app.db.base import DuplicateEmailError, DuplicateUserKeyError
-from app.services import access, cf_access, message_log
+from app.services import access, cf_access, channels, key_check, message_log
 from app.services.env import public_base_url
 from app.services.auth_passwords import hash_password, verify_password
 from app.services.auth_tokens import generate_raw_token, hmac_token_hash_hex, new_user_key, token_last4
@@ -59,6 +59,8 @@ def page_ctx(request: Request, account: dict[str, Any], active: str = "", **extr
         "user_name": account.get("name", ""), "user_email": account.get("email", ""),
         "user_key": account.get("user_key", ""), "is_owner": access.is_owner(account),
         "base_url": public_base_url(request),
+        "email_ready": bool(channels.connected_providers("email")),
+        "key_warning": access.is_owner(account) and key_check.has_problem(key_check.status()),
         "warn_not_persistent": not bootstrap.data_is_persistent(),
         **extra,
     }
@@ -190,7 +192,7 @@ def _get_active_apps(account: dict[str, Any]) -> Dict[str, dict[str, Any]]:
 def login_page(request: Request):
     if not access.has_accounts():
         return _redirect("/setup")  # fresh install: create the administrator in setup first
-    email = cf_access.verified_email(request.headers.get(cf_access.JWT_HEADER))
+    email, why_not = cf_access.check_request(request.headers.get(cf_access.JWT_HEADER))
     if email:
         account = _repo().find_account_by_email(email)
         if account:
@@ -202,7 +204,7 @@ def login_page(request: Request):
             _login_ctx(request, error=f"Cloudflare Access signed you in as {email}, but this gateway has no account for that email. Ask the administrator to add one."),
             status_code=403,
         )
-    return templates.TemplateResponse("gateway/login.html", _login_ctx(request))
+    return templates.TemplateResponse("gateway/login.html", _login_ctx(request, sso_why_not=why_not))
 
 
 @router.post("/gateway/login")

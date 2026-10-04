@@ -19,7 +19,7 @@ from app.db import backend_name, get_repository, reset_repository
 from app.db.base import Repository
 from app.services import secret_store
 
-VERIFY_TABLES = ("accounts", "messages", "attempts", "settings")
+VERIFY_TABLES = ("accounts", "messages", "attempts", "settings", "email_templates")
 
 
 def _make_repo(backend: str, uri: str, db_name: str) -> Repository:

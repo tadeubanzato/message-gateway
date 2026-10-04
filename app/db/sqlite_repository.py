@@ -23,7 +23,7 @@ import time
 import uuid
 from typing import Any, Optional
 
-from app.db.base import DuplicateEmailError, DuplicateUserKeyError, Repository
+from app.db.base import DuplicateEmailError, DuplicateTemplateNameError, DuplicateUserKeyError, Repository
 
 _DB_PATH = os.environ.get("SQLITE_PATH", "/app/data/gateway.db").strip() or "/app/data/gateway.db"
 
@@ -57,6 +57,12 @@ CREATE TABLE IF NOT EXISTS attempts (
 
 CREATE TABLE IF NOT EXISTS settings (
     name TEXT PRIMARY KEY,
+    doc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS email_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
     doc TEXT NOT NULL
 );
 
@@ -371,6 +377,38 @@ class SqliteRepository(Repository):
         self._conn().execute("DELETE FROM settings WHERE name = ?", (name,))
         self._conn().commit()
 
+    # ---- email templates ----
+    def list_email_templates(self) -> list[dict[str, Any]]:
+        rows = self._conn().execute("SELECT doc FROM email_templates ORDER BY name COLLATE NOCASE").fetchall()
+        return [json.loads(r[0]) for r in rows]
+
+    def get_email_template(self, template_id: str) -> Optional[dict[str, Any]]:
+        row = self._conn().execute("SELECT doc FROM email_templates WHERE id = ?", (template_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def find_email_template_by_name(self, name: str) -> Optional[dict[str, Any]]:
+        row = self._conn().execute("SELECT doc FROM email_templates WHERE name = ?", (name,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_email_template(self, doc: dict[str, Any]) -> None:
+        c = self._conn()
+        try:
+            c.execute(
+                "INSERT INTO email_templates (id, name, doc) VALUES (?, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET name = excluded.name, doc = excluded.doc",
+                (doc["_id"], doc["name"], json.dumps(doc, default=_json_default)),
+            )
+            c.commit()
+        except sqlite3.IntegrityError as e:
+            c.rollback()
+            raise DuplicateTemplateNameError(doc["name"]) from e
+
+    def delete_email_template(self, template_id: str) -> bool:
+        c = self._conn()
+        cur = c.execute("DELETE FROM email_templates WHERE id = ?", (template_id,))
+        c.commit()
+        return cur.rowcount > 0
+
     # ---- move data to another database ----
     def export_data(self) -> dict[str, list[dict[str, Any]]]:
         c = self._conn()
@@ -384,6 +422,7 @@ class SqliteRepository(Repository):
             "messages": [{**json.loads(r[0]), "_created_at": r[1]} for r in rows("SELECT doc, created_at FROM messages")],
             "attempts": [{**json.loads(r[0]), "_created_at": r[1]} for r in rows("SELECT doc, created_at FROM attempts")],
             "settings": [{"_id": r[0], **json.loads(r[1])} for r in rows("SELECT name, doc FROM settings")],
+            "email_templates": [json.loads(r[0]) for r in rows("SELECT doc FROM email_templates")],
         }
 
     def import_data(self, data: dict[str, list[dict[str, Any]]]) -> None:
@@ -406,12 +445,15 @@ class SqliteRepository(Repository):
         for d in data.get("settings", []):
             d = dict(d); name = d.pop("_id")
             c.execute("INSERT OR REPLACE INTO settings (name, doc) VALUES (?, ?)", (name, dump(d)))
+        for d in data.get("email_templates", []):
+            d = {**d, "_id": str(d["_id"])}
+            c.execute("INSERT OR REPLACE INTO email_templates (id, name, doc) VALUES (?, ?, ?)", (d["_id"], d["name"], dump(d)))
         c.commit()
 
     def counts(self) -> dict[str, int]:
         c = self._conn()
         return {t: int(c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
-                for t in ("accounts", "portal_sessions", "messages", "attempts", "settings")}
+                for t in ("accounts", "portal_sessions", "messages", "attempts", "settings", "email_templates")}
 
     # ---- lifecycle ----
     def ensure_indexes(self) -> None:
