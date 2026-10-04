@@ -653,10 +653,14 @@ WhatsApp needs a provider connected in the web app under **Channels > WhatsApp**
 - Enter the Gakai address and an application token (with *Read accounts* and *Send messages*), then tick one or more of
   its WhatsApp accounts and pick a **default**. A Gakai token sends from one account only, so every ticked account other
   than the token's own needs its own token; the gateway checks each one when you connect.
-- Pick the sending account with **`account`**: the Gakai **account id** (e.g. `account-4f1c2a9b`), shown with a **Copy**
-  button on the account's row in the web app. Names and phone numbers are not accepted, because they can repeat or change.
-  Leave `account` out to send from the default account.
-- An unknown id returns a `400` listing the connected accounts: `{"error": "Gakai account 'x' isn't connected.", "available_accounts": [{"id": "account-4f1c2a9b", "label": "Business"}]}`.
+- Pick the sender with **`account`**: the Gakai **account id** (e.g. `account-4f1c2a9b`), shown with a **Copy**
+  button on the account's row in the web app. The message goes out from that WhatsApp account to the number in `to`, so
+  one gateway can send as several senders: `account-A` to a phone, `account-B` to another, and so on. Names and phone
+  numbers are not accepted, because they can repeat or change. Leave `account` out to send from the default account.
+- `account` can be **any connected account**: one that is ticked on **Channels > WhatsApp > Gakai** and has its token
+  saved. Gakai tokens send from one account only, so an account that isn't connected can't be used. To add another
+  sender, open the Gakai page, tick it, paste the token created for that account in Gakai, and click Connect.
+- An unknown or not-connected id returns a `400` listing the connected accounts: `{"error": "Gakai account 'x' isn't connected.", "available_accounts": [{"id": "account-4f1c2a9b", "label": "Business"}]}`.
 - Gakai has no 24-hour window and sends to any number that is on WhatsApp. A number that isn't fails with `That number is not on WhatsApp.`
 - With more than one WhatsApp provider connected, add `"provider": "gakai"` to use it. `account` is ignored by the Meta provider.
 
