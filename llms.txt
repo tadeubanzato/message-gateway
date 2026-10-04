@@ -113,7 +113,9 @@ Tell the user, in your own words:
     Number ID and an access token from its API Setup page; warn them that token
     expires in 24 hours; a token that doesn't expire needs a System User under
     Business Settings instead (the WhatsApp page in the web app explains this).
-    Also warn them WhatsApp only delivers free-form messages to someone who has
+    If they run a Gakai server, WhatsApp can also be connected through it (address + token, then
+    tick the accounts to send from; senders pick one with "account": <Gakai account id>).
+    With Meta's API, also warn them WhatsApp only delivers free-form messages to someone who has
     messaged their WhatsApp number in the last 24 hours - anyone else needs an
     approved message template, which this gateway doesn't send. Each connected
     provider can also be turned on or off with a click, without disconnecting
