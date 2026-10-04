@@ -773,8 +773,8 @@ def send_telegram(req: TelegramMessage = Body(openapi_examples=_ex({"to": "12345
 
 @_post("/v1/messages/whatsapp", "WhatsApp", "Send a WhatsApp message", _SEND_DESC + _WHATSAPP_DESC)
 def send_whatsapp(req: WhatsAppMessage = Body(openapi_examples=_ex(
-                       ("Send a message", {"to": "+15551234567", "body": "Running late, back soon."}),
-                       ("Send from a specific Gakai account", {"to": "+15551234567", "body": "Running late, back soon.", "account": "account-4f1c2a9b"}))),
+                       ("Send from a Gakai account", {"to": "+15551234567", "body": "Running late, back soon.", "account": "account-4f1c2a9b"}),
+                       ("Send (Meta Cloud API, or Gakai's default account)", {"to": "+15551234567", "body": "Running late, back soon."}))),
                    auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
