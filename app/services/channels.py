@@ -8,6 +8,7 @@ secret_store), verify them with the provider, send a test, and report status.
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from typing import Any, Optional
@@ -217,6 +218,21 @@ CATALOG: dict[str, dict[str, Any]] = {
                     {"name": "WHATSAPP_API_VERSION", "label": "Graph API version", "placeholder": "v26.0", "optional": True},
                 ],
             },
+            "gakai": {
+                "label": "Gakai",
+                "blurb": 'Send from one or more WhatsApp accounts connected in your Gakai server. No 24-hour window.',
+                "help": (
+                    "In Gakai open Settings > Application tokens and create a token with Read accounts and Send "
+                    "messages ticked. Enter your Gakai address and that token to see your accounts, then tick the "
+                    "ones to send from. A Gakai token sends from its own account only, so every other account you "
+                    "tick needs its own token. A message picks one with \"account\"; without it the default is used."
+                ),
+                "fields": [
+                    {"name": "GAKAI_URL", "label": "Gakai address", "placeholder": "http://localhost:3000"},
+                    {"name": "GAKAI_LIST_TOKEN", "label": "Gakai token", "secret": True, "placeholder": "wh_live_..."},
+                ],
+                "gakai_accounts": True,  # plus any number of accounts, each with its own token
+            },
         },
     },
 }
@@ -244,6 +260,19 @@ def safe_check(channel: str, provider_name: Optional[str] = None) -> dict[str, A
         return {"ok": False, "provider": None, "error": str(e)}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "provider": None, "error": f"Check failed ({type(e).__name__})."}
+
+
+def gakai_accounts(url: str = "", token: str = "") -> dict[str, Any]:
+    """Accounts on a Gakai server, for the account dropdown. Works before anything is saved (the
+    form's values are used); a blank value falls back to what is already saved."""
+    from app.services.whatsapp.gakai import base_url, list_accounts
+
+    url = (url or "").strip() or get_env("GAKAI_URL") or ""
+    token = (token or "").strip() or get_env("GAKAI_LIST_TOKEN") or ""
+    try:
+        return {"ok": True, "accounts": list_accounts(url, token)}
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
 
 
 def telegram_recent_chats() -> dict[str, Any]:
@@ -350,6 +379,59 @@ def _save_pushover_apps(apps: list[dict[str, str]], default_app: Optional[str]) 
     return None
 
 
+# ---------------------------------------------------------------------
+# Gakai accounts: any number, each with its own token (a Gakai token belongs to one account).
+# Stored in the format whatsapp/gakai.py reads (see its docstring).
+# ---------------------------------------------------------------------
+def _gakai_env_var(account_id: str) -> str:
+    return "GAKAI_TOKEN_" + re.sub(r"[^A-Za-z0-9]", "_", account_id).upper()
+
+
+def gakai_account_list() -> list[dict[str, Any]]:
+    """Connected Gakai accounts for the settings page: never the token, only whether one is saved."""
+    from app.services.whatsapp.gakai import configured_accounts
+
+    return [{"id": a["id"], "label": a["label"], "phone": a["phone"], "is_default": a["is_default"],
+             "set": bool(a["token"]), "last4": mask_tail(a["token"])} for a in configured_accounts()]
+
+
+def _save_gakai_accounts(accounts: list[dict[str, str]], default_account: Optional[str]) -> Optional[str]:
+    """Replace the connected accounts. A blank token keeps that account's saved token. Returns an
+    error message, or None on success."""
+    from app.services.whatsapp.gakai import configured_accounts
+
+    existing = {a["id"]: a["token_env"] for a in configured_accounts()}
+    final: dict[str, str] = {}
+    info: dict[str, dict[str, Any]] = {}
+    tokens: dict[str, str] = {}
+    for item in accounts:
+        aid = (item.get("id") or "").strip()
+        token = (item.get("token") or "").strip()
+        if not aid:
+            continue
+        if aid in final:
+            return f"Account {aid!r} is listed twice."
+        env = existing.get(aid) or _gakai_env_var(aid)
+        if not token and not is_field_set(env):
+            return f"\"{item.get('label') or aid}\" needs its own token (a Gakai token sends from one account only)."
+        final[aid] = env
+        info[aid] = {"label": (item.get("label") or aid).strip(), "phone": item.get("phone") or None}
+        if token:
+            tokens[env] = token
+    if not final:
+        return "Tick at least one account."
+    for aid, env in existing.items():  # accounts that were unticked: forget their tokens
+        if aid not in final and env not in final.values():
+            secret_store.delete_setting(env)
+    chosen = (default_account or "").strip()
+    if chosen not in final:
+        prev = (get_env("GAKAI_DEFAULT_ACCOUNT") or "").strip()
+        chosen = prev if prev in final else next(iter(final))
+    secret_store.set_settings({**tokens, "GAKAI_ACCOUNTS": ",".join(f"{a}:{e}" for a, e in final.items()),
+                               "GAKAI_ACCOUNT_INFO": json.dumps(info), "GAKAI_DEFAULT_ACCOUNT": chosen})
+    return None
+
+
 def env_locked(names: list[str]) -> list[str]:
     """Settings currently pinned by an environment variable (which overrides what is saved here)."""
     import os
@@ -443,6 +525,8 @@ def provider_connected(channel: str, provider: str) -> bool:
         return False
     if info.get("apps"):
         return any(a["set"] for a in pushover_apps())
+    if info.get("gakai_accounts"):
+        return any(a["set"] for a in gakai_account_list())
     return True
 
 
@@ -474,10 +558,12 @@ def provider_status(channel: str, provider: str) -> dict[str, Any]:
              "last4": mask_tail(get_env(f["name"])) if f.get("secret") else None}
             for f in info["fields"]
         ],
-        "env_locked": env_locked([f["name"] for f in info["fields"]] + (["PUSHOVER_APPS"] if info.get("apps") else [])),
+        "env_locked": env_locked([f["name"] for f in info["fields"]] + (["PUSHOVER_APPS"] if info.get("apps") else []) + (["GAKAI_ACCOUNTS"] if info.get("gakai_accounts") else [])),
     }
     if info.get("apps"):
         out["apps"] = pushover_apps()
+    if info.get("gakai_accounts"):
+        out["accounts"] = gakai_account_list()
     return out
 
 
@@ -522,7 +608,9 @@ def all_status() -> list[dict[str, Any]]:
 def apply_provider(channel: str, provider: str, values: dict[str, str],
                    make_default: Optional[bool] = None,
                    apps: Optional[list[dict[str, str]]] = None,
-                   default_app: Optional[str] = None) -> dict[str, Any]:
+                   default_app: Optional[str] = None,
+                   accounts: Optional[list[dict[str, str]]] = None,
+                   default_account: Optional[str] = None) -> dict[str, Any]:
     """Validate, store (encrypted) and verify one provider's settings. Blank values
     keep whatever is already stored, so secrets never need to be re-entered. The
     provider becomes the default if the channel has no working default yet, or if
@@ -564,6 +652,18 @@ def apply_provider(channel: str, provider: str, values: dict[str, str],
         elif default_app:
             secret_store.set_setting("PUSHOVER_DEFAULT_APP", default_app.strip().lower())
 
+    if info.get("gakai_accounts"):
+        if accounts is None and not gakai_account_list():
+            return {"ok": False, "error": "Tick at least one account."}
+        if accounts is not None:
+            # Saved after the address, so a token typed for the first time is stored together with it.
+            secret_store.set_settings(to_store)
+            err = _save_gakai_accounts(accounts, default_account)
+            if err:
+                return {"ok": False, "error": err}
+        elif default_account:
+            secret_store.set_setting("GAKAI_DEFAULT_ACCOUNT", default_account.strip())
+
     to_store.update(info.get("extra", {}))
     had_working_default = default_provider(channel) in connected_providers(channel)
     if make_default or not had_working_default:
@@ -598,6 +698,13 @@ def remove_provider(channel: str, provider: str) -> dict[str, Any]:
             secret_store.delete_setting(_parse_apps(get_env("PUSHOVER_APPS")).get(a["name"], _app_env_var(a["name"])))
         secret_store.delete_setting("PUSHOVER_APPS")
         secret_store.delete_setting("PUSHOVER_DEFAULT_APP")
+    if info.get("gakai_accounts"):
+        from app.services.whatsapp.gakai import configured_accounts
+
+        for a in configured_accounts():
+            secret_store.delete_setting(a["token_env"])
+        for name in ("GAKAI_ACCOUNTS", "GAKAI_ACCOUNT_INFO", "GAKAI_DEFAULT_ACCOUNT"):
+            secret_store.delete_setting(name)
     if default_provider(channel) == provider:
         others = [n for n in connected_providers(channel) if n != provider]
         if others:

@@ -200,6 +200,7 @@ lets you set a chat ID used whenever a message doesn't say who to notify.
 | Provider | What you need |
 |---|---|
 | **WhatsApp Business Platform** | A Phone Number ID and access token from a Meta developer app (the official Cloud API - not a third-party wrapper) |
+| **Gakai** | Your Gakai address and an application token (Read accounts + Send messages). Your Gakai accounts are listed: tick one or more and pick a default. Each account needs its own token (the token's own account uses the one you entered). Send with `"account": "<account id>"` (each account's ID has a Copy button on the page); without it the default account sends. No 24-hour window |
 
 1. Create an app at [developers.facebook.com](https://developers.facebook.com/) and add the
    **WhatsApp** product.
@@ -452,6 +453,7 @@ app/
     sms/sinch, twilio, infobip  the other SMS providers
     telegram/bot_api  Telegram Bot API (send, check token, find chat ids)
     whatsapp/cloud_api  WhatsApp Business Platform / Meta Cloud API
+    whatsapp/gakai      Gakai WhatsApp client
   workers/           email / sms / push / telegram / whatsapp consumers (retry + dead letters)
   mcp_server/        MCP tools and their key-based login
   templates/         pages (Jinja)

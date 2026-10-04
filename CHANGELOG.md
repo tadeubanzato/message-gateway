@@ -7,6 +7,10 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [0.2.0] - Unreleased
 
 ### Added
+- **Gakai as a WhatsApp provider.** Enter the Gakai address and a token, tick one or more of its
+  WhatsApp accounts (each with its own token) and pick a default. Messages choose an account with
+  `"account"` set to the Gakai account id (API and MCP); the WhatsApp page shows a ready-to-copy `curl` for
+  `POST /v1/messages/whatsapp`. No 24-hour window with Gakai.
 - **Per-channel send endpoints** in the API reference, grouped Email / SMS / Push: plain and template
   variants for email (`/v1/messages/email`, `/email/template`) and SMS (`/sms`, `/sms/template`), and
   `/push`. Each has only its own fields and examples; the template endpoints document the

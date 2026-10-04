@@ -48,7 +48,7 @@ class WhatsAppCloudProvider(WhatsAppProvider):
     def _version(self) -> str:
         return (_env("WHATSAPP_API_VERSION", DEFAULT_VERSION) or DEFAULT_VERSION).strip() or DEFAULT_VERSION
 
-    def send(self, *, to: str, body: str, message_id: str) -> WhatsAppResult:
+    def send(self, *, to: str, body: str, message_id: str, account: Optional[str] = None) -> WhatsAppResult:  # account: Gakai only
         phone_id = _env("WHATSAPP_PHONE_NUMBER_ID")
         token = _env("WHATSAPP_ACCESS_TOKEN")
         timeout = float(_env("WHATSAPP_TIMEOUT_SECS", "15") or 15.0)
