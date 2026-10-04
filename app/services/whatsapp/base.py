@@ -21,7 +21,7 @@ class WhatsAppProvider(ABC):
     name: str = "base"
 
     @abstractmethod
-    def send(self, *, to: str, body: str, message_id: str) -> WhatsAppResult:
+    def send(self, *, to: str, body: str, message_id: str, account: Optional[str] = None) -> WhatsAppResult:
         ...
 
     @abstractmethod

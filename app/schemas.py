@@ -48,7 +48,7 @@ class MessageRequest(BaseModel):
     provider: Optional[str] = Field(None, description="Which connected provider to use, e.g. `sendgrid`. Default: the channel's default provider.")
 
     # push-only fields (ignored by other channels)
-    app: Optional[str] = Field(None, description="Push (Pushover) only: which named app to send from. Default: the gateway's default app.")
+    app: Optional[str] = Field(None, description="Push (Pushover): which named app to send from. WhatsApp (Gakai): which connected account to send from. Default: the default app or account.")
     device: Optional[str] = Field(None, description="Push only: send to a specific device name.")
     url: Optional[str] = Field(None, description="Push only: a link to attach (http:// or https://).")
     url_title: Optional[str] = Field(None, description="Push only: text for the attached link.")
@@ -188,9 +188,15 @@ class TelegramMessage(_ChannelMessage):
 
 class WhatsAppMessage(_ChannelMessage):
     _channel = "whatsapp"
-    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567`, a list, or several separated by commas. Omit to use the default recipient set in the web app. Only delivers if this number has messaged your WhatsApp business number in the last 24 hours - see Channels > WhatsApp.")
+    to: Optional[Union[str, list[str]]] = Field(None, description="Phone number in international format with country code, e.g. `+15551234567`, a list, or several separated by commas. Omit to use the default recipient set in the web app. With the Meta Cloud API provider it only delivers if this number has messaged your WhatsApp business number in the last 24 hours (Gakai has no such limit) - see Channels > WhatsApp.")
     body: str = Field(description="The message text.")
-    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `cloud_api` (only if connected in the web app).")
+    provider: Optional[str] = Field(None, description=_PROVIDER_DESC + " Options: `cloud_api`, `gakai` (only if connected in the web app).")
+    account: Optional[str] = Field(None, description="Gakai only: which connected WhatsApp account to send from, by its Gakai account id, e.g. `account-4f1c2a9b` (shown with a Copy button under Channels > WhatsApp). Default: the account marked as default. An unknown id returns a 400 listing the connected accounts.")
+
+    def to_request(self) -> "MessageRequest":
+        data = self.model_dump(exclude_none=True)
+        account = data.pop("account", None)
+        return MessageRequest(channel="whatsapp", app=account, **data)   # the account travels in `app`, like a Pushover app
 
 
 class PushMessage(_ChannelMessage):

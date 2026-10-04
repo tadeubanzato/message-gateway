@@ -20,6 +20,7 @@ from app.routes.portal import (
     _load_account_from_session, page_ctx, templates,
 )
 from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, key_check, message_log, secret_store
+from app.services.env import public_base_url
 from app.services.phone import normalize_phone
 from app.services.auth_passwords import hash_password, verify_password
 from app.version import APP_VERSION
@@ -223,6 +224,7 @@ def channel_page(request: Request, channel: str):
     payload = {
         "channel": channel, "label": channels.CHANNEL_LABELS[channel],
         "spec": channels.public_catalog()[channel], "status": status,
+        "base_url": public_base_url(request), "user_key": account.get("user_key", ""),
     }
     return templates.TemplateResponse(
         "gateway/channel.html",
@@ -241,6 +243,8 @@ class SaveBody(BaseModel):
     make_default: Optional[bool] = None
     apps: Optional[list[AppItem]] = None      # Pushover: the complete list of named apps
     default_app: Optional[str] = None
+    accounts: Optional[list[dict[str, Any]]] = None     # Gakai: the complete list of ticked accounts, each with its token
+    default_account: Optional[str] = None
 
 
 class ProviderBody(BaseModel):
@@ -266,6 +270,7 @@ def channel_save(request: Request, channel: str, body: SaveBody):
         channel, body.provider, body.values, body.make_default,
         apps=[a.model_dump() for a in body.apps] if body.apps is not None else None,
         default_app=body.default_app,
+        accounts=body.accounts, default_account=body.default_account,
     )
     result["status"] = channels.channel_status(channel)
     return result
@@ -318,6 +323,19 @@ def channel_defaults_save(request: Request, channel: str, body: DefaultsBody):
     result = channels.save_defaults(channel, body.values)
     result["status"] = channels.channel_status(channel)
     return result
+
+
+class GakaiAccountsBody(BaseModel):
+    url: str = ""
+    token: str = ""
+
+
+@router.post("/gateway/channels/whatsapp/gakai/accounts", include_in_schema=False)
+def gakai_list_accounts(request: Request, body: GakaiAccountsBody):
+    """Accounts on the Gakai server, to fill the account dropdown. Fetched server-side so the
+    token never has to be usable from the browser."""
+    _owner_or_error(request)
+    return channels.gakai_accounts(body.url, body.token)
 
 
 @router.post("/gateway/channels/telegram/find-chats", include_in_schema=False)

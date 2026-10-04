@@ -72,4 +72,6 @@ def build_test_request(channel: str, to: Optional[str], provider: Optional[str],
         return MessageRequest(channel="push", subject="Message Gateway test", body=TEST_TEXT, app=(app or None), **common)
     if channel == "email":
         return MessageRequest(channel="email", to=to, subject="Message Gateway test", body=TEST_TEXT, emailType="txt", **common)
+    if channel == "whatsapp":
+        return MessageRequest(channel="whatsapp", to=(to or None), body=TEST_TEXT, app=(app or None), **common)  # app = Gakai account
     return MessageRequest(channel=channel, to=(to or None), body=TEST_TEXT, **common)  # sms, telegram: to + body only

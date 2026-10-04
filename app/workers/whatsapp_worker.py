@@ -7,6 +7,7 @@ def _deliver(msg: dict):
         to=msg.get("to", ""),
         body=msg.get("body", ""),
         message_id=msg.get("message_id", ""),
+        account=(msg.get("app") or None),   # the API's `account` travels in the queue message's `app`
     )
 
 

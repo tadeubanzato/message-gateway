@@ -112,6 +112,10 @@
       const usable = p.apps.filter(a => a.set), d = usable.find(a => a.is_default);
       return usable.length + " application" + (usable.length === 1 ? "" : "s") + (d ? ", default: " + d.name : "") + " (" + usable.map(a => a.name).join(", ") + ")";
     }
+    if (p.accounts && p.accounts.length) {
+      const usable = p.accounts.filter(a => a.set), d = usable.find(a => a.is_default);
+      return usable.length + " account" + (usable.length === 1 ? "" : "s") + (d ? ", default: " + d.label : "") + " (" + usable.map(a => a.label).join(", ") + ")";
+    }
     const val = (suffix) => { const f = p.fields.find(x => x.name.endsWith(suffix) && x.value); return f ? f.value : null; };
     return (val("FROM_EMAIL") && "Sends from " + val("FROM_EMAIL")) || (val("FROM_NUMBER") && "Sends from " + val("FROM_NUMBER")) ||
       (val("_TOPIC") && "Topic: " + val("_TOPIC")) || (val("SMS_URL") && "Endpoint: " + val("SMS_URL")) || (val("INFOBIP_FROM") && "Sender: " + val("INFOBIP_FROM")) || "Credentials saved";
@@ -195,6 +199,87 @@
         i.addEventListener("input", upd); upd(); fields.append(pl, pre);
       }
     }
+    let gakaiRows = null;
+    if (p.name === "gakai") {
+      // Address + token -> checklist of the accounts on that Gakai. Tick one or many; each needs its own token
+      // (a Gakai token sends from one account only), except the token's own account, which uses the token above.
+      const inp = n => fields.querySelector('[data-name="' + n + '"]');
+      const url = inp("GAKAI_URL"), tok = inp("GAKAI_LIST_TOKEN");
+      const saved = new Map((p.accounts || []).map(a => [a.id, a]));
+      const known = new Map();          // id -> {id,label,phone,status,current}
+      saved.forEach(a => known.set(a.id, { id: a.id, label: a.label, phone: a.phone, status: null, current: false }));
+      const wrap = el("div");
+      wrap.innerHTML = `<label style="margin-top:16px">WhatsApp accounts</label>
+        <p class="help" style="margin:0 0 8px" data-ghelp></p>
+        <div class="row" style="gap:8px"><button type="button" class="btn ghost sm" data-gload>Load accounts</button></div>
+        <div data-gout></div><div data-grows style="margin-top:8px"></div>`;
+      fields.appendChild(wrap);
+      const rowsEl = $("[data-grows]", wrap), out = $("[data-gout]", wrap), lb = $("[data-gload]", wrap);
+      $("[data-ghelp]", wrap).textContent = "Tick the accounts to send from. Choose which one is the default for messages that don't name an account. Upstream systems pick an account by its ID (use Copy).";
+      gakaiRows = () => [...rowsEl.children].filter(r => $("[data-gcheck]", r).checked).map(r => ({
+        id: r.dataset.id, label: r.dataset.label, phone: r.dataset.phone || null,
+        token: (($("[data-gtoken]", r) || {}).value || "").trim() || (r.dataset.current === "1" ? tok.value.trim() : ""),
+        isDefault: $("[data-gdefault]", r).checked,
+      }));
+      const draw = () => {
+        const keep = new Map(gakaiRows ? gakaiRows().map(x => [x.id, x]) : []);
+        const firstDraw = !rowsEl.children.length;
+        const prev = firstDraw ? null : keep;
+        rowsEl.innerHTML = "";
+        const defId = (p.accounts || []).find(a => a.is_default);
+        [...known.values()].forEach(a => {
+          const r = el("div"); r.dataset.id = a.id; r.dataset.label = a.label; r.dataset.phone = a.phone || ""; r.dataset.current = a.current ? "1" : "0";
+          r.style.cssText = "border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px";
+          const wasTicked = prev ? prev.has(a.id) : saved.has(a.id);
+          r.innerHTML = `<div class="row between" style="gap:10px;flex-wrap:wrap">
+              <label style="margin:0;display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" data-gcheck style="width:auto;margin:0" /> <span data-gname></span></label>
+              <label style="margin:0;display:flex;gap:6px;align-items:center;cursor:pointer" class="muted"><input type="radio" name="gdefault" data-gdefault style="width:auto;margin:0" /> Default</label></div>
+            <div class="help row" style="margin:6px 0 0;gap:8px;align-items:center">Account ID <code data-gid style="user-select:all"></code><button type="button" class="btn ghost sm" data-gcopy>Copy</button></div>
+            <div data-gtokrow style="margin-top:8px"><input type="password" data-gtoken autocomplete="off" /><p class="help" style="margin:4px 0 0" data-gtokhelp></p></div>`;
+          $("[data-gname]", r).textContent = a.label + (a.phone ? " · +" + a.phone : (a.status ? " · not paired" : "")) + (a.status && a.status !== "WORKING" ? " (" + a.status + ")" : "");
+          $("[data-gid]", r).textContent = a.id; const cb = $("[data-gcopy]", r); cb.onclick = () => copyText(a.id, cb);
+          const chk = $("[data-gcheck]", r), tk = $("[data-gtoken]", r), dflt = $("[data-gdefault]", r), tr = $("[data-gtokrow]", r), th = $("[data-gtokhelp]", r);
+          chk.checked = wasTicked;
+          if (a.current) { tr.innerHTML = '<p class="help" style="margin:0">Sends with the Gakai token above.</p>'; }
+          const sv = saved.get(a.id);
+          dflt.checked = prev ? !!(prev.get(a.id) && prev.get(a.id).isDefault) : !!(sv && sv.is_default);
+          if (!a.current) {
+            tk.placeholder = sv && sv.set ? (sv.last4 ? "••••••••" + sv.last4 + " (saved)" : "•••••••• saved") : "This account's own token";
+            th.textContent = sv && sv.set ? "Leave empty to keep the saved token." : "Gakai tokens belong to one account: paste the token created for this account (Gakai > Settings > Application tokens).";
+          }
+          const sync = () => { tr.style.display = chk.checked ? "" : "none"; dflt.disabled = !chk.checked;
+            if (!chk.checked) dflt.checked = false;
+            else if (![...rowsEl.querySelectorAll("[data-gdefault]")].some(x => x.checked)) dflt.checked = true; };
+          chk.onchange = sync; sync();
+          rowsEl.appendChild(r);
+        });
+        if (![...rowsEl.querySelectorAll("[data-gdefault]")].some(x => x.checked)) { const f = rowsEl.querySelector("[data-gcheck]:checked"); if (f) $("[data-gdefault]", f.closest("[data-id]")).checked = true; }
+      };
+      const load = async () => {
+        if (!url.value.trim() || !tok.value.trim()) { if (!(p.accounts || []).length) say(out, "Enter the Gakai address and token, then your accounts load.", "err"); return; }
+        lb.disabled = true; lb.textContent = "Loading…";
+        try {
+          const r = await post("/gateway/channels/whatsapp/gakai/accounts", { url: url.value.trim(), token: tok.value.trim() });
+          if (!r.ok) { say(out, r.error || "Could not load accounts.", "err"); return; }
+          if (!r.accounts.length) { say(out, "That Gakai server has no accounts yet. Add one in Gakai first.", "err"); return; }
+          const ticked = gakaiRows ? gakaiRows() : [];
+          known.clear();
+          r.accounts.forEach(a => known.set(a.id, a));
+          (p.accounts || []).forEach(a => { if (!known.has(a.id)) known.set(a.id, { id: a.id, label: a.label, phone: a.phone, status: "NOT IN GAKAI", current: false }); });
+          // Nothing ticked yet on a new connection: start with the token's own account, which needs no extra token.
+          if (!ticked.length && !saved.size) { const cur = r.accounts.find(a => a.current); if (cur) saved.set(cur.id, null); }
+          draw(); out.innerHTML = "";
+          say(out, r.accounts.length + " account" + (r.accounts.length > 1 ? "s" : "") + " found in Gakai.", "ok");
+        } catch (e) { say(out, e.message, "err"); } finally { lb.disabled = false; lb.textContent = "Load accounts"; }
+      };
+      lb.onclick = load;
+      // Load by itself as soon as both are filled in (typing, pasting or browser autofill).
+      let t = null;
+      const auto = () => { clearTimeout(t); t = setTimeout(() => { if (url.value.trim() && tok.value.trim()) load(); }, 500); };
+      [url, tok].forEach(i => { i.addEventListener("input", auto); i.addEventListener("change", auto); });
+      draw();
+      if (url.value.trim() && tok.value.trim()) auto();
+    }
     if (spec.example) {
       const ex = el("button", "btn ghost sm", "Fill in an example"); ex.type = "button"; ex.style.marginTop = "10px";
       ex.onclick = () => fields.querySelectorAll("[data-name]").forEach(i => {
@@ -247,6 +332,11 @@
         const rows = [...appRows.children];
         extra.apps = rows.map(r => ({ name: $("[data-appname]", r).value.trim(), token: $("[data-apptoken]", r).value.trim() }));
         extra.default_app = rows.length ? $("[data-appname]", rows[0]).value.trim() : null;   // the first row is the default
+      }
+      if (gakaiRows) {
+        const picked = gakaiRows();
+        extra.accounts = picked.map(x => ({ id: x.id, label: x.label, phone: x.phone, token: x.token }));
+        const d = picked.find(x => x.isDefault); extra.default_account = d ? d.id : (picked[0] ? picked[0].id : null);
       }
       const label = save.textContent; save.disabled = true; save.textContent = "Checking…";
       try {
@@ -307,7 +397,7 @@
       const r = await act(enabledBadge, "/provider/enabled", { enabled: !p.enabled });
       if (r) { if (r.ok) render(); else say(out, r.error || "Could not save.", "err"); }
     };
-    btn("Send test", "", () => window.MG.openTest(CH, LABEL, status.connected, status.default, p.name, p.apps));
+    btn("Send test", "", () => window.MG.openTest(CH, LABEL, status.connected, status.default, p.name, p.apps || (p.accounts || []).map(a => ({ name: a.id, label: a.label, set: a.set, is_default: a.is_default }))));
     if (!p.is_default) btn("Make default", "ghost", async (b) => { const r = await act(b, "/default", {}); if (r) { if (r.ok) { ui.flash = { text: spec.label + " is now the default.", kind: "ok" }; render(); } else say(out, r.error, "err"); } });
     let armed = false;
     btn("Remove", "danger", async (b) => {
@@ -371,6 +461,22 @@
     return card;
   }
 
+  // ---------------- sample request: how a user triggers a message through this gateway ----------------
+  function curlCard(connected) {
+    if (CH !== "whatsapp" || !connected.length) return null;
+    const card = el("div", "card");
+    const body = { to: "+15551234567", body: "Hello from my gateway" };
+    if (connected.length > 1) body.provider = (connected.find(p => p.is_default) || connected[0]).name;
+    const gk = connected.find(p => p.name === "gakai");
+    if (gk && gk.accounts && gk.accounts.length > 1) body.account = (gk.accounts.find(a => a.is_default) || gk.accounts[0]).id;
+    const cmd = "curl -X POST " + D.base_url + "/v1/messages/whatsapp \\\n  -H \"X-User-Key: " + D.user_key + "\" \\\n  -H \"X-API-Token: YOUR_TOKEN\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '" + JSON.stringify(body) + "'";
+    card.innerHTML = `<h3>Send a message</h3><p class="help" style="margin-top:0">Use your user key and an API token from <a href="/gateway/keys">API keys</a> in place of <code>YOUR_TOKEN</code>. Change <code>to</code> to the recipient's number with country code, or leave it out to use the default recipient.</p>`;
+    const pre = el("pre"); const code = el("code"); code.textContent = cmd; pre.appendChild(code);
+    const cp = el("button", "btn ghost sm", "Copy"); cp.type = "button"; cp.onclick = () => copyText(cmd, cp);
+    card.append(pre, cp);
+    return card;
+  }
+
   function render() {
     header();
     const flash = $("#flash"); flash.innerHTML = "";
@@ -402,6 +508,7 @@
         main.appendChild(tip);
       }
       const dc = defaultsCard(); if (dc) main.appendChild(dc);
+      const cc = curlCard(connected); if (cc) main.appendChild(cc);
     }
   }
   render();

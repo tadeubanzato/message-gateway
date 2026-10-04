@@ -26,11 +26,13 @@
     dlg.querySelector("[data-provider-row]").classList.toggle("hidden", !multi);
     // Pushover apps: let the tester pick which application sends the test.
     var appSel = dlg.querySelector("[data-app]"), appRow = dlg.querySelector("[data-app-row]");
+    appRow.querySelector("label").textContent = channel === "whatsapp" ? "Account" : "Application";
     var usable = (apps || []).filter(function (a) { return a.set; });
-    appSel.innerHTML = usable.map(function (a) { return '<option value="' + a.name + '">' + a.name + (a.is_default ? " (default)" : "") + "</option>"; }).join("");
+    appSel.innerHTML = usable.map(function (a) { return '<option value="' + a.name + '">' + (a.label || a.name) + (a.is_default ? " (default)" : "") + "</option>"; }).join("");
     var def = usable.filter(function (a) { return a.is_default; })[0];
     if (def) appSel.value = def.name;
-    function syncApp() { appRow.classList.toggle("hidden", !(channel === "push" && sel.value === "pushover" && usable.length > 1)); }
+    var usesApp = function () { return usable.length > 1 && ((channel === "push" && sel.value === "pushover") || (channel === "whatsapp" && sel.value === "gakai")); };
+    function syncApp() { appRow.classList.toggle("hidden", !usesApp()); }
     sel.onchange = syncApp; syncApp();
     var to = dlg.querySelector("[data-to]");
     dlg.querySelector("[data-to-row]").classList.toggle("hidden", !needsTo);
@@ -41,7 +43,7 @@
     var go = dlg.querySelector("[data-send]"); go.disabled = false; go.textContent = "Send test";
     go.onclick = function () {
       go.disabled = true; go.textContent = "Sending…";
-      post("/gateway/channels/" + channel + "/test", { provider: sel.value, to: needsTo ? to.value : null, app: (channel === "push" && sel.value === "pushover" && usable.length > 1) ? appSel.value : null })
+      post("/gateway/channels/" + channel + "/test", { provider: sel.value, to: needsTo ? to.value : null, app: usesApp() ? appSel.value : null })
         .then(function (r) { say(out, r.ok ? (r.note || "Delivered. Check your device or inbox. It's also in the Message log, marked Test.") : (r.error || "Send failed."), r.ok ? "ok" : "err"); })
         .catch(function (e) { say(out, e.message, "err"); })
         .then(function () { go.disabled = false; go.textContent = "Send test"; });

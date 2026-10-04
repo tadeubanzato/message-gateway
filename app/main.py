@@ -515,6 +515,16 @@ def enqueue_message(req: MessageRequest, account_id: Optional[str], source: str 
                     detail={"error": f"Pushover app '{req.app.strip()}' isn't set up.", "available_apps": names},
                 )
 
+    if channel == "whatsapp" and effective == "gakai" and (req.app or "").strip():
+        from app.services.whatsapp.gakai import configured_accounts, resolve_account
+
+        if resolve_account(req.app) is None:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": f"Gakai account '{req.app.strip()}' isn't connected.",
+                        "available_accounts": [{"id": a["id"], "label": a["label"]} for a in configured_accounts()]},
+            )
+
     message_ids: list[str] = []
 
     for to in recipients:
@@ -642,7 +652,11 @@ WhatsApp needs the WhatsApp Business Platform (Meta's Cloud API) connected in th
 that page for the full setup (a permanent token needs a System User, not the 24-hour token the
 API Setup page gives you by default).
 
-**The 24-hour window.** WhatsApp only delivers a free-form message like this API sends if the
+**Gakai.** Alternatively connect a Gakai server: enter its address and a token, tick one or more of
+its WhatsApp accounts, and pick a default. Send with `"account": "<account id>"` (shown with a Copy button
+on the WhatsApp page) to choose one; without it the default account sends. Gakai has no 24-hour window.
+
+**The 24-hour window (Meta Cloud API only).** WhatsApp only delivers a free-form message like this API sends if the
 recipient has messaged your WhatsApp number in the last 24 hours - anyone else needs a
 pre-approved message template, which this endpoint doesn't send. A message outside the window
 fails with a clear `error` explaining that, not a delivered status.

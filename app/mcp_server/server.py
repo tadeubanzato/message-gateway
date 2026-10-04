@@ -361,9 +361,10 @@ async def send_whatsapp(
     body: str,
     to: Union[str, list[str], None] = None,
     provider: Optional[str] = None,
+    account: Optional[str] = None,
     wait_seconds: int = 8,
 ) -> dict:
-    """Send a WhatsApp message via the WhatsApp Business Platform. Use this when the user says
+    """Send a WhatsApp message via the WhatsApp Business Platform or a connected Gakai server. Use this when the user says
     "send a WhatsApp message", "WhatsApp me" and the like.
 
     body: the message text.
@@ -373,16 +374,18 @@ async def send_whatsapp(
         WhatsApp number in the last 24 hours - if the send fails for that reason, tell the user
         plainly; there's no template-message fallback here.
     provider: which connected WhatsApp provider to use (default: the channel default).
+    account: Gakai only: which connected WhatsApp account to send from, by its account id
+        (see list_providers -> gakai_accounts). Leave it out for the default account.
     wait_seconds: how long to wait for the delivery result (0 = don't wait).
     """
     recips = _recipients(to)
     if recips is None:
         if not channels.default_whatsapp_number():
             return {"ok": False, "error": "Say which phone number to message (with country code), or ask the administrator to set a default recipient in the web app (Channels > WhatsApp)."}
-        return await _send(ctx, wait_seconds, channel="whatsapp", body=body, provider=provider)  # API fills in the default
+        return await _send(ctx, wait_seconds, channel="whatsapp", body=body, provider=provider, app=account)  # API fills in the default
     numbers = [_phone(n) for n in (recips if isinstance(recips, list) else [recips])]
     return await _send(ctx, wait_seconds, channel="whatsapp", to=numbers[0] if len(numbers) == 1 else numbers,
-                       body=body, provider=provider)
+                       body=body, provider=provider, app=account)
 
 
 @tool()
@@ -454,6 +457,8 @@ def list_providers(ctx: Context, channel: Optional[str] = None) -> dict:
         out[ch] = entry
     if "push" in out:
         out["push"]["pushover_apps"] = [a["name"] for a in channels.pushover_apps() if a["set"]]
+    if "whatsapp" in out:
+        out["whatsapp"]["gakai_accounts"] = [{"id": a["id"], "label": a["label"], "default": a["is_default"]} for a in channels.gakai_account_list() if a["set"]]
     return {"ok": True, "channels": out}
 
 

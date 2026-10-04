@@ -6,6 +6,7 @@ from app.services.whatsapp.base import WhatsAppProvider
 
 PROVIDER_REGISTRY = {
     "cloud_api": "app.services.whatsapp.cloud_api:WhatsAppCloudProvider",
+    "gakai": "app.services.whatsapp.gakai:GakaiProvider",
 }
 
 _cache: dict[str, WhatsAppProvider] = {}
