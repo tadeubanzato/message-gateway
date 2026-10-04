@@ -134,7 +134,7 @@ Errors return JSON with a `detail`:
 
 | Status | Meaning | Example `detail` |
 |---|---|---|
-| `400` | Bad request: missing or invalid field, unknown provider, unknown app, unknown template, missing `context` value | `{"error": "Provider 'foo' isn't set up for email.", "available": ["sendgrid"], "default": "sendgrid"}` |
+| `400` | Bad request: missing or invalid field, unknown provider, unknown app or WhatsApp (Gakai) account, unknown template, missing `context` value | `{"error": "Provider 'foo' isn't set up for email.", "available": ["sendgrid"], "default": "sendgrid"}` |
 | `401` | Missing, wrong or revoked `X-User-Key` / `X-API-Token` | `"Unauthorized"` |
 | `403` | The provider that would send this - the one you named, or the channel's default - is turned off (Channels > that channel > that provider's card) | `{"error": "Mailjet is turned off on the gateway.", "channel": "email", "provider": "mailjet"}` |
 | `409` | No provider is connected for the channel yet (an administrator connects one in the web app) | `{"error": "No sms provider is connected yet...", "available": [], "default": "custom_http"}` |
@@ -205,7 +205,7 @@ API_TAGS = [
     {"name": "SMS", "description": "Send a text message, as plain text or from a saved template."},
     {"name": "Push", "description": "Send a push notification."},
     {"name": "Telegram", "description": "Send a Telegram message via a bot."},
-    {"name": "WhatsApp", "description": "Send a WhatsApp message via the WhatsApp Business Platform (Cloud API)."},
+    {"name": "WhatsApp", "description": "Send a WhatsApp message via the WhatsApp Business Platform (Cloud API) or one or more accounts on a Gakai server."},
     {"name": "Templates", "description": "Look up the email and SMS templates you can send by ID or name, and the `context` values each needs."},
 ]
 
@@ -647,19 +647,25 @@ _WHATSAPP_DESC = """
 
 ### Set up WhatsApp first
 
-WhatsApp needs the WhatsApp Business Platform (Meta's Cloud API) connected in the web app under
-**Channels > WhatsApp** - a Phone Number ID and an access token from a Meta developer app. See
-that page for the full setup (a permanent token needs a System User, not the 24-hour token the
-API Setup page gives you by default).
+WhatsApp needs a provider connected in the web app under **Channels > WhatsApp**. Two are supported:
 
-**Gakai.** Alternatively connect a Gakai server: enter its address and a token, tick one or more of
-its WhatsApp accounts, and pick a default. Send with `"account": "<account id>"` (shown with a Copy button
-on the WhatsApp page) to choose one; without it the default account sends. Gakai has no 24-hour window.
+**Gakai** (a Gakai WhatsApp server)
+- Enter the Gakai address and an application token (with *Read accounts* and *Send messages*), then tick one or more of
+  its WhatsApp accounts and pick a **default**. A Gakai token sends from one account only, so every ticked account other
+  than the token's own needs its own token; the gateway checks each one when you connect.
+- Pick the sending account with **`account`**: the Gakai **account id** (e.g. `account-4f1c2a9b`), shown with a **Copy**
+  button on the account's row in the web app. Names and phone numbers are not accepted, because they can repeat or change.
+  Leave `account` out to send from the default account.
+- An unknown id returns a `400` listing the connected accounts: `{"error": "Gakai account 'x' isn't connected.", "available_accounts": [{"id": "account-4f1c2a9b", "label": "Business"}]}`.
+- Gakai has no 24-hour window and sends to any number that is on WhatsApp. A number that isn't fails with `That number is not on WhatsApp.`
+- With more than one WhatsApp provider connected, add `"provider": "gakai"` to use it. `account` is ignored by the Meta provider.
 
-**The 24-hour window (Meta Cloud API only).** WhatsApp only delivers a free-form message like this API sends if the
-recipient has messaged your WhatsApp number in the last 24 hours - anyone else needs a
-pre-approved message template, which this endpoint doesn't send. A message outside the window
-fails with a clear `error` explaining that, not a delivered status.
+**WhatsApp Business Platform** (Meta's Cloud API)
+- A Phone Number ID and an access token from a Meta developer app. See that page for the full setup (a permanent token
+  needs a System User, not the 24-hour token the API Setup page gives you by default).
+- **The 24-hour window.** WhatsApp only delivers a free-form message like this API sends if the recipient has messaged
+  your WhatsApp number in the last 24 hours - anyone else needs a pre-approved message template, which this endpoint
+  doesn't send. A message outside the window fails with a clear `error` explaining that, not a delivered status.
 """
 _PUSH_DESC = """
 
@@ -739,7 +745,9 @@ def send_telegram(req: TelegramMessage = Body(examples=[{"to": "123456789", "bod
 
 
 @_post("/v1/messages/whatsapp", "WhatsApp", "Send a WhatsApp message", _SEND_DESC + _WHATSAPP_DESC)
-def send_whatsapp(req: WhatsAppMessage = Body(examples=[{"to": "+15551234567", "body": "Running late, back soon."}]),
+def send_whatsapp(req: WhatsAppMessage = Body(examples=[
+                       {"to": "+15551234567", "body": "Running late, back soon."},
+                       {"to": "+15551234567", "body": "Running late, back soon.", "provider": "gakai", "account": "account-4f1c2a9b"}]),
                    auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
