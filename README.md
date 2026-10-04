@@ -212,7 +212,29 @@ lets you set a chat ID used whenever a message doesn't say who to notify.
    Settings → System users**, create a system user, assign it the app and the WhatsApp Business
    Account with full control, and **Generate token** there instead. Paste that token in the web app.
 
-**The 24-hour window.** This is WhatsApp's own rule, not something the gateway adds: a free-form
+**Gakai.** Connect a [Gakai](https://github.com/tadeubanzato/gakai.co) server instead of (or next to) Meta's API:
+
+1. In Gakai open **Settings → Application tokens** and create a token with **Read accounts** and **Send messages** ticked.
+2. In the gateway open **Channels → WhatsApp → Gakai**, enter the Gakai address and that token. Your Gakai accounts are
+   listed; tick the ones to send from and pick one as the **Default**. (`localhost` addresses work even though the gateway
+   runs in Docker.)
+3. A Gakai token sends from **its own account only**: the token's own account needs nothing more, every other account you tick
+   needs the token created for that account. **Connect** checks each one.
+4. Each account row shows its **Account ID** with a **Copy** button. The system that sends picks the account with that ID:
+
+```bash
+curl -X POST http://localhost:8010/v1/messages/whatsapp \
+  -H "X-User-Key: YOUR_USER_KEY" -H "X-API-Token: YOUR_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"to": "+15551234567", "body": "Hello", "provider": "gakai", "account": "account-4f1c2a9b"}'
+```
+
+Leave `account` out to use the default account. Only the ID is accepted (not the name or number), because names can repeat
+or change. An unknown ID returns a `400` with the list of connected accounts (`available_accounts`). `provider` is only
+needed when more than one WhatsApp provider is connected. The MCP `send_whatsapp` tool takes the same `account`.
+Gakai has no 24-hour window, but a number that isn't on WhatsApp fails with `That number is not on WhatsApp.`
+
+**The 24-hour window (Meta's Cloud API only).** This is WhatsApp's own rule, not something the gateway adds: a free-form
 message only delivers if the recipient has messaged your WhatsApp number in the last 24 hours.
 Anyone else needs a pre-approved message *template* (an HSM), which this gateway doesn't send -
 sending to someone outside the window fails with a clear error explaining why, not a silent drop.
@@ -249,7 +271,7 @@ each one.
 | `email` | `to`, `subject`, `body`; optional `emailType` (`txt` or `html`) |
 | `sms` | `body`; `to`, or omit it to use the default phone number |
 | `telegram` | `body`; `to` (a chat ID), or omit it to use the default chat ID |
-| `whatsapp` | `body`; `to`, or omit it to use the default recipient - only delivers within the 24-hour window |
+| `whatsapp` | `body`; `to`, or omit it to use the default recipient; optional `account` (a Gakai account **ID**, see below). With the Meta provider it only delivers within the 24-hour window |
 
 Every channel also accepts:
 
@@ -432,6 +454,10 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
 | SMS says "failed" with your endpoint | Check the URL, headers and body preview; add or fix the "response must contain" text |
 | Telegram "Find chat IDs" shows nothing | Open your bot in Telegram and send it any message first - bots can't message someone who hasn't messaged them |
 | Telegram send fails ("chat not found" / "bot was blocked") | The chat ID is wrong, or that user blocked/never started the bot - use **Find chat IDs** to get a fresh one |
+| Gakai: "rejected the token" when loading accounts | The token is wrong, was regenerated, or the address points at something else. In Docker, `localhost` is translated for you; otherwise use an address the gateway can reach |
+| Gakai: connect says a token "belongs to" another account | Each ticked account needs the token created for it in Gakai (Settings → Application tokens), not the first account's token |
+| Gakai: "can't send messages" / "not connected" | Tick **Send messages** on that token, or reconnect the account in Gakai (it must show WORKING) |
+| Gakai send fails with `isn't connected` and a list of ids | The `account` is not one of the connected account IDs - copy it from the account row |
 | WhatsApp send fails ("more than 24 hours have passed") | The recipient hasn't messaged your WhatsApp number recently enough - free-form messages need a reply within the last 24 hours; a message template would be required otherwise, which isn't supported here |
 | WhatsApp send fails with an OAuth/token error | The access token expired (the 24-hour one from the API Setup page) or is wrong - generate a permanent one via a System User instead (see the WhatsApp section above) |
 | Forgot the administrator password | Passwords can't be reset by email; restore from a backup, or reinstall with `docker compose down -v` |
