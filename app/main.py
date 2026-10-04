@@ -712,46 +712,73 @@ def _post(path, tag, summary, description):
                     tags=[tag], summary=summary, description=description, responses=_SEND_RESPONSES)
 
 
+def _ex(*items):
+    """Request examples as OpenAPI media-type examples. (Examples placed inside the schema are ignored by
+    the API reference, which then shows every field empty.) Each item is a body dict or (title, body dict)."""
+    out = {}
+    for n, item in enumerate(items, 1):
+        title, value = item if isinstance(item, tuple) else ("Example", item)
+        out[f"example{n}"] = {"summary": title, "value": value}
+    return out
+
+
+_openapi_default = app.openapi
+
+
+def _openapi_with_both_credentials():
+    """Every send needs the user key AND the API token. FastAPI lists two security schemes as alternatives,
+    so the reference showed only X-User-Key; require both."""
+    schema = _openapi_default()
+    for path in schema.get("paths", {}).values():
+        for op in path.values():
+            if isinstance(op, dict) and op.get("security") == [{"UserKey": []}, {"ApiToken": []}]:
+                op["security"] = [{"UserKey": [], "ApiToken": []}]
+    return schema
+
+
+app.openapi = _openapi_with_both_credentials
+
+
 @_post("/v1/messages/email", "Email", "Send an email", _SEND_DESC)
-def send_email(req: EmailMessage = Body(examples=[{"to": "someone@example.com", "subject": "Hello", "body": "Hi there!"}]),
+def send_email(req: EmailMessage = Body(openapi_examples=_ex({"to": "someone@example.com", "subject": "Hello", "body": "Hi there!"})),
                auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
 
 @_post("/v1/messages/email/template", "Email", "Send an email from a template", _EMAIL_TEMPLATE_DESC)
-def send_email_template(req: EmailTemplateMessage = Body(examples=[{"to": "ana@example.com", "subject": "Welcome, {{ context.name }}", "template": "welcome", "context": {"name": "Ana"}}]),
+def send_email_template(req: EmailTemplateMessage = Body(openapi_examples=_ex({"to": "ana@example.com", "subject": "Welcome, {{ context.name }}", "template": "welcome", "context": {"name": "Ana"}})),
                         auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
 
 @_post("/v1/messages/sms", "SMS", "Send an SMS", _SEND_DESC)
-def send_sms(req: SmsMessage = Body(examples=[{"to": "+15551234567", "body": "Running late, back soon."}]),
+def send_sms(req: SmsMessage = Body(openapi_examples=_ex({"to": "+15551234567", "body": "Running late, back soon."})),
              auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
 
 @_post("/v1/messages/sms/template", "SMS", "Send an SMS from a template", _SMS_TEMPLATE_DESC)
-def send_sms_template(req: SmsTemplateMessage = Body(examples=[{"to": "+15551234567", "template": "welcome", "context": {"name": "Ana"}}]),
+def send_sms_template(req: SmsTemplateMessage = Body(openapi_examples=_ex({"to": "+15551234567", "template": "welcome", "context": {"name": "Ana"}})),
                       auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
 
 @_post("/v1/messages/push", "Push", "Send a push notification", _SEND_DESC + _PUSH_DESC)
-def send_push(req: PushMessage = Body(examples=[{"subject": "Deploy finished", "body": "Version 1.4 is live.", "app": "alerts"}]),
+def send_push(req: PushMessage = Body(openapi_examples=_ex({"subject": "Deploy finished", "body": "Version 1.4 is live.", "app": "alerts"})),
               auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
 
 @_post("/v1/messages/telegram", "Telegram", "Send a Telegram message", _SEND_DESC + _TELEGRAM_DESC)
-def send_telegram(req: TelegramMessage = Body(examples=[{"to": "123456789", "body": "Running late, back soon."}]),
+def send_telegram(req: TelegramMessage = Body(openapi_examples=_ex({"to": "123456789", "body": "Running late, back soon."})),
                    auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
 
 @_post("/v1/messages/whatsapp", "WhatsApp", "Send a WhatsApp message", _SEND_DESC + _WHATSAPP_DESC)
-def send_whatsapp(req: WhatsAppMessage = Body(examples=[
-                       {"to": "+15551234567", "body": "Running late, back soon."},
-                       {"to": "+15551234567", "body": "Running late, back soon.", "provider": "gakai", "account": "account-4f1c2a9b"}]),
+def send_whatsapp(req: WhatsAppMessage = Body(openapi_examples=_ex(
+                       ("Send from a Gakai account", {"to": "+15551234567", "body": "Running late, back soon.", "account": "account-4f1c2a9b"}),
+                       ("Send (Meta Cloud API, or Gakai's default account)", {"to": "+15551234567", "body": "Running late, back soon."}))),
                    auth: dict = Depends(require_api_key)):
     return enqueue_message(req.to_request(), auth.get("account_id"))
 
