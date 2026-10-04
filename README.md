@@ -229,6 +229,20 @@ curl -X POST http://localhost:8010/v1/messages/whatsapp \
   -d '{"to": "+15551234567", "body": "Hello", "provider": "gakai", "account": "account-4f1c2a9b"}'
 ```
 
+**Several senders.** `account` can be any account that is connected here (ticked, with its token saved), so one gateway
+can send as different WhatsApp numbers, each request naming its sender and recipient:
+
+```bash
+# from account A to one phone
+... -d '{"to": "+15551234567", "body": "Hello", "account": "ACCOUNT_ID_A"}'
+# from account B to another
+... -d '{"to": "+15557654321", "body": "Hello", "account": "ACCOUNT_ID_B"}'
+```
+
+To add a sender, tick it on **Channels → WhatsApp → Gakai**, paste the token created for that account in Gakai (a Gakai
+token sends from its own account only, so the gateway needs one per sender) and click **Connect**. An account that isn't
+connected can't be used: the request gets a `400` listing the connected ones.
+
 Leave `account` out to use the default account. Only the ID is accepted (not the name or number), because names can repeat
 or change. An unknown ID returns a `400` with the list of connected accounts (`available_accounts`). `provider` is only
 needed when more than one WhatsApp provider is connected. The MCP `send_whatsapp` tool takes the same `account`.
