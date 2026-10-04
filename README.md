@@ -212,7 +212,7 @@ lets you set a chat ID used whenever a message doesn't say who to notify.
    Settings → System users**, create a system user, assign it the app and the WhatsApp Business
    Account with full control, and **Generate token** there instead. Paste that token in the web app.
 
-**Gakai.** Connect a Gakai server instead of (or next to) Meta's API:
+**Gakai.** Connect a [Gakai](https://github.com/tadeubanzato/gakai.co) server instead of (or next to) Meta's API:
 
 1. In Gakai open **Settings → Application tokens** and create a token with **Read accounts** and **Send messages** ticked.
 2. In the gateway open **Channels → WhatsApp → Gakai**, enter the Gakai address and that token. Your Gakai accounts are
