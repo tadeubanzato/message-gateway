@@ -76,7 +76,7 @@ CATALOG: dict[str, dict[str, Any]] = {
                 "label": "Custom API endpoint",
                 "blurb": 'Setup your own SMS service',
                 "help": (
-                    "Send through your own SMS service, such as an SMS box or modem API on your network. "
+                    "Send through your own SMS service, such as an SMS box or any HTTP API on your network. "
                     "Give the endpoint address and a sample JSON body; the gateway sends every message in that "
                     "pattern, replacing {{to}}, {{message}}, {{message_id}} and {{to_digits}} (the number without the +)."
                 ),
@@ -98,6 +98,25 @@ CATALOG: dict[str, dict[str, Any]] = {
                     "CUSTOM_SMS_BODY": '{\n  "number": "{{to}}",\n  "message": "{{message}}",\n  "message_id": "{{message_id}}"\n}',
                     "CUSTOM_SMS_SUCCESS_TEXT": '"status": "ok"',
                 },
+            },
+            "smsgate": {
+                "label": "Android phone (SMSGate)",
+                "blurb": 'Text from your own phone and SIM, with the SMS Gateway for Android app.',
+                "links": [{"label": "Get the Android app", "url": "https://docs.sms-gate.app/installation/"}],
+                "help": (
+                    "Sends through an Android phone running the SMS Gateway for Android app, so messages come from "
+                    "your own number. Pair the phone with this gateway using the steps below, then enter the "
+                    "username and password the app shows on its Home tab."
+                ),
+                "smsgate_pairing": True,  # the form shows how to point the phone at this gateway
+                "fields": [
+                    {"name": "SMSGATE_USERNAME", "label": "Username (from the app)"},
+                    {"name": "SMSGATE_PASSWORD", "label": "Password (from the app)", "secret": True},
+                    {"name": "SMSGATE_URL", "label": "Server address, if not the one built into this gateway", "optional": True,
+                     "placeholder": "https://api.sms-gate.app/3rdparty/v1"},
+                    {"name": "SMSGATE_DEVICE_ID", "label": "Device ID, to always send from one phone", "optional": True},
+                    {"name": "SMSGATE_SIM_NUMBER", "label": "SIM slot (1-3), on a dual-SIM phone", "optional": True, "placeholder": "1"},
+                ],
             },
             "twilio": {
                 "label": "Twilio",
@@ -717,7 +736,6 @@ def remove_provider(channel: str, provider: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------
 # Import from an existing .env file (migrating an older install)
 # ---------------------------------------------------------------------
-_LEGACY_MODEM_BODY = '{\n  "number": "{{to}}",\n  "message": "{{message}}",\n  "message_id": "{{message_id}}"\n}'
 
 
 def _parse_env_text(text: str) -> dict[str, str]:
@@ -760,20 +778,8 @@ def import_env_text(text: str) -> dict[str, Any]:
         to_store["PUSHOVER_APPS"] = "default:PUSHOVER_APPTOKEN_DEFAULT"
         to_store["PUSHOVER_APPTOKEN_DEFAULT"] = env["PUSHOVER_APPTOKEN"]
 
-    # Older installs used a fixed "local modem" SMS API: map it to the custom endpoint.
-    if env.get("SMS_API_BASE_URL") and env.get("SMS_API_TOKEN") and not env.get("CUSTOM_SMS_URL"):
-        to_store.update({
-            "CUSTOM_SMS_URL": env["SMS_API_BASE_URL"].rstrip("/") + "/api/send_sms",
-            "CUSTOM_SMS_METHOD": "POST",
-            "CUSTOM_SMS_HEADERS": f"Authorization: Bearer {env['SMS_API_TOKEN']}",
-            "CUSTOM_SMS_BODY": _LEGACY_MODEM_BODY,
-            "CUSTOM_SMS_SUCCESS_TEXT": '"status": "ok"',
-        })
-        if (env.get("SMS_PROVIDER") or "local_modem").lower() in ("local_modem", "custom_http"):
-            to_store["SMS_PROVIDER"] = "custom_http"
-
     # Provider choices: honour the selected default when it names a provider we know.
-    consumed = {"SMS_API_BASE_URL", "SMS_API_TOKEN"} if "CUSTOM_SMS_URL" in to_store and "SMS_API_BASE_URL" in env else set()
+    consumed: set[str] = set()
     for ch, spec in CATALOG.items():
         chosen = (env.get(spec["selector"]) or "").strip().lower()
         if chosen in spec["providers"] and spec["selector"] not in to_store:

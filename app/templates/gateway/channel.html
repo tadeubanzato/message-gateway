@@ -118,7 +118,7 @@
     }
     const val = (suffix) => { const f = p.fields.find(x => x.name.endsWith(suffix) && x.value); return f ? f.value : null; };
     return (val("FROM_EMAIL") && "Sends from " + val("FROM_EMAIL")) || (val("FROM_NUMBER") && "Sends from " + val("FROM_NUMBER")) ||
-      (val("_TOPIC") && "Topic: " + val("_TOPIC")) || (val("SMS_URL") && "Endpoint: " + val("SMS_URL")) || (val("INFOBIP_FROM") && "Sender: " + val("INFOBIP_FROM")) || "Credentials saved";
+      (val("_TOPIC") && "Topic: " + val("_TOPIC")) || (val("SMS_URL") && "Endpoint: " + val("SMS_URL")) || (val("SMSGATE_USERNAME") && "Phone account: " + val("SMSGATE_USERNAME")) || (val("INFOBIP_FROM") && "Sender: " + val("INFOBIP_FROM")) || "Credentials saved";
   }
 
   // ---------------- the setup form for ONE provider ----------------
@@ -177,6 +177,40 @@
           else say(out, "Filled in below, but we couldn't tell which part of the body is the phone number, message or message ID - add {% raw %}{{to}}, {{message}} and {{message_id}}{% endraw %} yourself.", "err");
         } catch (e) { say(out, "Couldn't read that: " + e.message, "err"); }
       };
+    }
+    if (spec.smsgate_pairing) {
+      const pw = el("div"); pw.style.cssText = "background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0 16px";
+      const pl = el("label", "", "Pair your phone with this gateway"); pl.style.marginTop = "0";
+      const body = el("div"); body.append(el("p", "help", "Checking the built-in SMSGate server…"));
+      pw.append(pl, body); fields.appendChild(pw);
+      const copyRow = (label, value) => {
+        const l = el("label", "", label);
+        const row = el("div", "row"); row.style.cssText = "gap:8px;flex-wrap:nowrap";
+        const code = el("code", "", value); code.style.cssText = "flex:1;overflow-wrap:anywhere;user-select:all";
+        const b = el("button", "btn ghost sm", "Copy"); b.type = "button";
+        b.onclick = async () => { try { await navigator.clipboard.writeText(value); b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy"; }, 1500); } catch (e) { /* select-all on the value still works */ } };
+        row.append(code, b);
+        return [l, row];
+      };
+      post("/gateway/channels/sms/smsgate/pairing", {}).then(r => {
+        body.innerHTML = "";
+        if (!r.running) {
+          body.append(el("p", "help", "The built-in SMSGate server isn't running. Start it on the machine that runs this gateway, then reload this page:"));
+          const pre = el("pre"); pre.style.margin = "0 0 8px"; pre.appendChild(el("code", "", "MG_SMSGATE=1 ./install.sh"));
+          body.append(pre, el("p", "help", "Using another SMSGate server instead (for example the public cloud)? Skip this and fill in its address below."));
+          return;
+        }
+        const steps = el("ol", "help"); steps.style.cssText = "margin:0 0 4px;padding-left:18px";
+        ["In the app, open Settings > Cloud Server and enter the API URL and private token below.",
+         "On the Home tab, turn on Cloud server and tap the Offline button until it says Online.",
+         "Enter the username and password the app now shows on its Home tab in the fields below, and save."]
+          .forEach(t => steps.appendChild(el("li", "", t)));
+        body.append(steps, ...copyRow("API URL", r.api_url), ...copyRow("Private token", r.private_token));
+        if (!r.api_url.startsWith("https://")) {
+          const w = el("div", "msg", "The app only connects over https. Open this page through your gateway's public https address (or set it under Settings > Public address) to see the URL to use.");
+          w.style.cssText = "background:var(--warnbg);color:var(--warn);margin:10px 0 0"; body.appendChild(w);
+        }
+      }).catch(() => { body.innerHTML = ""; body.append(el("p", "help", "Couldn't check the built-in SMSGate server. Reload the page to try again.")); });
     }
     for (const f of spec.fields) {
       const l = el("label", "", f.label + (f.optional ? " (optional)" : ""));

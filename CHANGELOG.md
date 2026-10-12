@@ -6,6 +6,10 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [0.2.0] - Unreleased
 
+### Removed
+- **The "local modem" `.env` import.** Importing an old `.env` no longer turns `SMS_API_BASE_URL` / `SMS_API_TOKEN`
+  into a custom SMS endpoint. Set the endpoint up under Channels > SMS instead.
+
 ### Changed
 - **The API reference moved to `/api/docs`** (its OpenAPI file to `/api/openapi.json`). `/scalar` and `/docs`
   are gone, so there is one place for the API documentation.
@@ -19,6 +23,11 @@ project uses [Semantic Versioning](https://semver.org/).
   when a template is rendered, so templates saved earlier are cleaned without re-saving.
 
 ### Added
+- **Send SMS from your own Android phone.** A new SMS provider, *Android phone (SMSGate)*, sends through the
+  open-source SMS Gateway for Android app. `MG_SMSGATE=1 ./install.sh` starts an SMSGate server alongside the gateway
+  (three extra containers behind a compose profile, no extra ports); the phone reaches it through the gateway at
+  `/api/mobile/...`, so one public address is enough. **Channels > SMS** shows the API URL and private token to
+  enter in the app. Another SMSGate server, such as the public cloud, can be used by entering its address.
 - **Warning when the encryption keys don't match the database.** Saved credentials are encrypted with a key kept
   in the data volume; if the volume is replaced, or another install shares the database with its own key, they
   silently looked "not set up". Now there is a banner for administrators on every page, a startup log warning, and
