@@ -111,6 +111,8 @@ services:
       GATEWAY__URL: http://smsgate:3000/api/3rdparty/v1
     ports:
       - "${SMSGATE_DASHBOARD_BIND:-127.0.0.1}:${SMSGATE_DASHBOARD_PORT:-3010}:3000"
+      # Same again over IPv6: a .local hostname often resolves to an IPv6 address first.
+      - "${SMSGATE_DASHBOARD_BIND6:-[::1]}:${SMSGATE_DASHBOARD_PORT:-3010}:3000"
     depends_on:
       - smsgate
 
