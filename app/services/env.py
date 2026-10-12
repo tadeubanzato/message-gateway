@@ -37,4 +37,11 @@ def public_base_url(request) -> str:
     override = (get_env("PUBLIC_BASE_URL") or "").strip().rstrip("/")
     if override:
         return override
-    return str(request.base_url).rstrip("/")
+    base = str(request.base_url).rstrip("/")
+    # A proxy or tunnel that terminates https talks plain http to the gateway and says
+    # so in X-Forwarded-Proto. This only decides which address is shown to the person
+    # who sent the header, so it is honoured from any sender.
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded == "https" and base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
+    return base

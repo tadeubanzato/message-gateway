@@ -15,6 +15,8 @@ project uses [Semantic Versioning](https://semver.org/).
   are gone, so there is one place for the API documentation.
 
 ### Fixed
+- **Addresses shown behind an https proxy or tunnel now say `https`.** The gateway showed `http://` for its own
+  address (the MCP URL, API examples) when a proxy terminated https in front of it, unless a public address was set.
 - **`context` values are made HTML-safe by the gateway** in HTML emails. Plain text is escaped and line breaks become
   `<br>`; text an upstream tool already escaped is not double-escaped; only simple formatting tags and safe links survive.
   A key ending in `_html` is inserted as is. Callers no longer need to escape anything.
