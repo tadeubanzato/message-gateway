@@ -116,6 +116,8 @@ CATALOG: dict[str, dict[str, Any]] = {
                      "placeholder": "https://api.sms-gate.app/3rdparty/v1"},
                     {"name": "SMSGATE_DEVICE_ID", "label": "Device ID, to always send from one phone", "optional": True},
                     {"name": "SMSGATE_SIM_NUMBER", "label": "SIM slot (1-3), on a dual-SIM phone", "optional": True, "placeholder": "1"},
+                    {"name": "SMSGATE_WEBHOOK_SIGNING_KEY", "label": "Webhook signing key (app: Settings > Webhooks), to verify incoming messages",
+                     "secret": True, "optional": True},
                 ],
             },
             "twilio": {
@@ -712,6 +714,8 @@ def remove_provider(channel: str, provider: str) -> dict[str, Any]:
         secret_store.delete_setting(f["name"])
     for extra in info.get("extra", {}):
         secret_store.delete_setting(extra)
+    if info.get("smsgate_pairing"):
+        secret_store.delete_setting("SMSGATE_WEBHOOK_SECRET")  # its incoming-message address stops working
     if info.get("apps"):
         for a in pushover_apps():
             secret_store.delete_setting(_parse_apps(get_env("PUSHOVER_APPS")).get(a["name"], _app_env_var(a["name"])))

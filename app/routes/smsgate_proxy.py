@@ -8,16 +8,22 @@ internal network; the gateway is the only thing that calls it.
 
 Responses are streamed, never buffered: the app can hold a long-lived event
 stream open here to be told about new messages.
+
+Also receives the phone's webhooks (texts it received, and what became of the
+ones the gateway sent), at an address that ends in a secret only the phone has.
 """
 
 from __future__ import annotations
 
+import json
+
 import httpx
 from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from app.services import smsgate_server
+from app.services import smsgate_server, smsgate_webhooks
 
 router = APIRouter()
 
@@ -62,3 +68,21 @@ async def smsgate_mobile(request: Request, path: str):
         upstream.aiter_raw(), status_code=upstream.status_code, headers=out_headers,
         background=BackgroundTask(upstream.aclose),
     )
+
+
+@router.post(smsgate_webhooks.PATH + "/{secret}")
+async def smsgate_webhook(request: Request, secret: str):
+    body = await request.body()
+    if not smsgate_webhooks.secret_matches(secret):
+        return JSONResponse(status_code=404, content={"message": "Not found"})
+    if not smsgate_webhooks.signature_ok(body, request.headers.get("x-signature"), request.headers.get("x-timestamp")):
+        return JSONResponse(status_code=401, content={"message": "Invalid signature"})
+    try:
+        event = json.loads(body.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        return JSONResponse(status_code=400, content={"message": "Not JSON"})
+    if not isinstance(event, dict):
+        return JSONResponse(status_code=400, content={"message": "Not an event"})
+    # A failure here answers 500, so the phone retries and the text isn't lost.
+    result = await run_in_threadpool(smsgate_webhooks.handle, event)
+    return {"ok": True, "result": result}

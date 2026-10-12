@@ -19,7 +19,7 @@ from app.routes.portal import (
     _get_active_apps, _iso, _redirect, _require_account_or_redirect,
     _load_account_from_session, page_ctx, templates,
 )
-from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, key_check, message_log, secret_store, smsgate_server
+from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, key_check, message_log, secret_store, smsgate_server, smsgate_webhooks
 from app.services.env import public_base_url
 from app.services.phone import normalize_phone
 from app.services.auth_passwords import hash_password, verify_password
@@ -347,6 +347,23 @@ def smsgate_pairing(request: Request):
         "api_url": public_base_url(request) + smsgate_server.MOBILE_PATH + "/v1",
         "private_token": smsgate_server.private_token(),
     }
+
+
+class SmsGateWebhooksBody(BaseModel):
+    action: str = "status"   # status | enable | disable
+
+
+@router.post("/gateway/channels/sms/smsgate/webhooks", include_in_schema=False)
+def smsgate_webhooks_toggle(request: Request, body: SmsGateWebhooksBody):
+    """Have the paired phone report incoming texts and delivery results to this gateway."""
+    _owner_or_error(request)
+    if not channels.provider_connected("sms", "smsgate"):
+        return {"ok": False, "enabled": False, "error": "Save the phone's username and password first."}
+    if body.action == "enable":
+        return smsgate_webhooks.enable(public_base_url(request))
+    if body.action == "disable":
+        return smsgate_webhooks.disable()
+    return smsgate_webhooks.status()
 
 
 @router.post("/gateway/channels/telegram/find-chats", include_in_schema=False)

@@ -9,9 +9,12 @@
   <div class="kv">
     <div class="k">Channel</div><div>{{ m.channel }}</div>
     <div class="k">To</div><div>{% if m.channel == 'push' %}{{ m.app or 'default app' }}{% if m.device %} / {{ m.device }}{% endif %}{% else %}{{ m.to or '-' }}{% endif %}</div>
-    <div class="k">Queued</div><div>{{ (m.queued_at or '')[:19].replace('T',' ') }} UTC</div>
+    {% if m.direction == 'inbound' %}<div class="k">From</div><div>{{ m.from or '-' }}</div>
+    <div class="k">Received</div><div>{{ (m.received_at or m.queued_at or '')[:19].replace('T',' ') }} UTC</div>
+    {% else %}<div class="k">Queued</div><div>{{ (m.queued_at or '')[:19].replace('T',' ') }} UTC</div>{% endif %}
     {% if m.delivered_at %}<div class="k">Delivered</div><div>{{ m.delivered_at[:19].replace('T',' ') }} UTC</div>{% endif %}
     {% if m.failed_at %}<div class="k">Failed</div><div>{{ m.failed_at[:19].replace('T',' ') }} UTC</div>{% endif %}
+    {% if m.handset_status %}<div class="k">On the phone</div><div>{{ m.handset_status }}{% if m.handset_at %} at {{ m.handset_at[:19].replace('T',' ') }} UTC{% endif %}</div>{% endif %}
     {% if m.provider %}<div class="k">Provider</div><div>{{ m.provider }}</div>{% endif %}
     {% if m.template %}<div class="k">Template</div><div>{{ m.template }}</div>{% endif %}
   </div>
@@ -23,7 +26,7 @@
   {% else %}{% if m.subject %}<div><b>{{ m.subject }}</b></div>{% endif %}<div style="white-space:pre-wrap;word-break:break-word;margin-top:6px">{{ m.body }}</div>{% endif %}
 </div>
 
-<div class="card">
+{% if m.direction != 'inbound' %}<div class="card">
   <h2>Delivery attempts</h2>
   {% if attempts %}
   <div class="scroll"><table>
@@ -36,5 +39,5 @@
   </table></div>
   {% else %}<div class="muted">No attempts yet. The message is waiting in the queue.</div>{% endif %}
   {% if m.last_error and m.status != 'delivered' %}<div class="msg err">{{ m.last_error }}</div>{% endif %}
-</div>
+</div>{% endif %}
 {% endblock %}

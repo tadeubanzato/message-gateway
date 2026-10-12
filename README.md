@@ -183,8 +183,16 @@ or a tunnel in front of it); open the SMS page through that address to see the r
 To use a different SMSGate server instead - for example the public cloud at
 `https://api.sms-gate.app/3rdparty/v1` - skip `MG_SMSGATE` and fill in *Server address*.
 
+*Incoming messages.* Once the phone is connected, **Incoming messages → Turn on** (same page) has
+the phone report to the gateway the texts it receives and what happened to the ones you sent. Received
+texts appear in the **Message log** with the status `received` and the sender's number, and in
+`GET /v1/messages?status=received` for the administrator's API keys. Sent texts gain an *On the
+phone* line (sent, delivered or failed), and a text the handset could not send is marked failed
+with the reason. The phone posts to an address on the gateway that ends in a random secret; for a
+second check, copy the app's *Settings → Webhooks → Signing key* into *Webhook signing key*.
+
 Good to know: a message is logged as delivered when the SMSGate server accepts it for the phone,
-not when the handset has sent it. The phone's credentials and the server's queue live in the
+not when the handset has sent it (turn on incoming messages to see that too). The phone's credentials and the server's queue live in the
 `smsgate_db` volume, separate from the gateway's own database. To wake the phone promptly, a
 private server relays a push notification through SMSGate's public service; the app's SSE mode
 avoids that.
@@ -491,7 +499,8 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
   Subjects, bodies and credentials are encrypted.
 - The gateway calls provider APIs, and your custom SMS URL, from your machine.
 - With the built-in SMSGate server on, `/api/mobile/...` is forwarded to it without a gateway
-  login: that is the phone app's own API, protected by the private token (to register a phone)
+  login, and so is `/api/smsgate/webhook/<secret>` (where the phone reports incoming texts, only
+  with the secret in the address): that is the phone app's own API, protected by the private token (to register a phone)
   and by each phone's own token after that. The server's send API is not reachable from outside.
 
 ## 8. Troubleshooting

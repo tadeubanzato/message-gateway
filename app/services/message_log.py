@@ -99,7 +99,7 @@ def channel_trend(account_id: str, days: int = 14, channels: tuple[str, ...] = (
         docs = []
     for d in docs:
         ch = d.get("channel")
-        if ch not in channels:
+        if ch not in channels or d.get("direction") == "inbound":
             continue
         day = (d.get("queued_at") or "")[:10]
         if day in counts:

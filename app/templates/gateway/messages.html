@@ -2,12 +2,12 @@
 {% block title %}Message Gateway - Message log{% endblock %}
 {% block content %}
 <h1>Message log</h1>
-<p class="sub">Everything sent through your gateway, newest first. Entries are kept 90 days.</p>
+<p class="sub">Everything sent through your gateway, and texts received on a paired phone, newest first. Entries are kept 90 days.</p>
 
 <form method="get" action="/gateway/messages" class="row" style="margin-bottom:12px">
   <input name="q" value="{{ q }}" placeholder="Search recipient, subject, text or ID" style="flex:1;min-width:220px;max-width:360px" />
   <select name="channel" style="width:auto"><option value="">All channels</option>{% for c in ["email","sms","push","telegram","whatsapp"] %}<option value="{{ c }}" {{ 'selected' if channel == c }}>{{ c }}</option>{% endfor %}</select>
-  <select name="status" style="width:auto"><option value="">Any status</option>{% for s in ["queued","delivered","failed"] %}<option value="{{ s }}" {{ 'selected' if status == s }}>{{ s }}</option>{% endfor %}</select>
+  <select name="status" style="width:auto"><option value="">Any status</option>{% for s in ["queued","delivered","failed","received"] %}<option value="{{ s }}" {{ 'selected' if status == s }}>{{ s }}</option>{% endfor %}</select>
   <label class="row" style="margin:0;gap:6px;color:var(--fg);font-size:13px"><input type="checkbox" name="tests" value="hide" style="width:auto" {{ 'checked' if hide_tests }} /> Hide tests</label>
   <button class="btn" type="submit">Filter</button>
   {% if q or channel or status or hide_tests %}<a class="btn ghost" href="/gateway/messages">Clear</a>{% endif %}
@@ -18,15 +18,15 @@
 <div class="card" style="padding:6px 8px">
 {% if messages %}
   <div class="scroll"><table>
-    <thead><tr><th>Time (UTC)</th><th>Channel</th><th>To</th><th>Message</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Time (UTC)</th><th>Channel</th><th>To / From</th><th>Message</th><th>Status</th><th></th></tr></thead>
     <tbody>
     {% for m in messages %}
       <tr>
         <td style="white-space:nowrap">{{ (m.queued_at or '')[:19].replace('T',' ') }}</td>
         <td>{{ m.channel }}{% if m.is_test %}<span class="badge test">Test</span>{% endif %}{% if m.source == 'mcp' %}<span class="badge mcp">MCP</span>{% endif %}</td>
-        <td>{% if m.channel == 'push' %}{{ m.app or 'default app' }}{% if m.device %} / {{ m.device }}{% endif %}{% else %}{{ m.to or '-' }}{% endif %}</td>
+        <td>{% if m.channel == 'push' %}{{ m.app or 'default app' }}{% if m.device %} / {{ m.device }}{% endif %}{% elif m.direction == 'inbound' %}<span class="muted">from</span> {{ m.from or '-' }}{% else %}{{ m.to or '-' }}{% endif %}</td>
         <td style="max-width:340px;word-break:break-word">{% if m.subject %}<b>{{ m.subject }}</b><br />{% endif %}{{ (m.body or '-')[:140] }}{{ '…' if m.body and m.body|length > 140 }}</td>
-        <td><span class="badge {{ m.status }}">{{ m.status }}</span>{% if m.last_error and m.status != 'delivered' %}<div class="muted" style="color:var(--err)">{{ m.last_error }}</div>{% endif %}</td>
+        <td><span class="badge {{ m.status }}">{{ m.status }}</span>{% if m.handset_status and m.status == 'delivered' %}<div class="muted">phone: {{ m.handset_status }}</div>{% endif %}{% if m.last_error and m.status != 'delivered' %}<div class="muted" style="color:var(--err)">{{ m.last_error }}</div>{% endif %}</td>
         <td><a href="/gateway/messages/{{ m.message_id }}">Details</a></td>
       </tr>
     {% endfor %}

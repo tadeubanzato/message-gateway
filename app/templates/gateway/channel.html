@@ -211,6 +211,26 @@
           w.style.cssText = "background:var(--warnbg);color:var(--warn);margin:10px 0 0"; body.appendChild(w);
         }
       }).catch(() => { body.innerHTML = ""; body.append(el("p", "help", "Couldn't check the built-in SMSGate server. Reload the page to try again.")); });
+
+      if (p.connected) {   // incoming texts and delivery results: the phone reports them to this gateway
+        const iw = el("div"); iw.style.cssText = pw.style.cssText;
+        const il = el("label", "", "Incoming messages"); il.style.marginTop = "0";
+        const ih = el("p", "help", "Have the phone report the texts it receives, and whether the ones you send were sent, delivered or failed. They appear in the Message log.");
+        ih.style.margin = "0 0 8px";
+        const ir = el("div", "row"); const ib = el("button", "btn ghost sm", "Checking…"); ib.type = "button"; ib.disabled = true;
+        const is = el("span", "muted"); ir.append(ib, is);
+        const io = el("div");
+        iw.append(il, ih, ir, io); fields.appendChild(iw);
+        const show = (r) => {
+          ib.disabled = false; ib.textContent = r.enabled ? "Turn off" : "Turn on"; ib.dataset.action = r.enabled ? "disable" : "enable";
+          is.textContent = r.enabled ? "On" + (r.signed ? ", signatures checked" : "") : "Off";
+          if (r.ok === false && r.error) say(io, r.error, "err"); else io.innerHTML = "";
+        };
+        const run = (action) => post("/gateway/channels/sms/smsgate/webhooks", { action }).then(show)
+          .catch(e => { ib.disabled = false; ib.textContent = "Try again"; ib.dataset.action = "status"; say(io, e.message, "err"); });
+        ib.onclick = () => { ib.disabled = true; run(ib.dataset.action || "status"); };
+        run("status");
+      }
     }
     for (const f of spec.fields) {
       const l = el("label", "", f.label + (f.optional ? " (optional)" : ""));
