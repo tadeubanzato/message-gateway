@@ -30,6 +30,7 @@ project uses [Semantic Versioning](https://semver.org/).
   (three extra containers behind a compose profile, no extra ports); the phone reaches it through the gateway at
   `/api/mobile/...`, so one public address is enough. **Channels > SMS** shows the API URL and private token to
   enter in the app. Another SMSGate server, such as the public cloud, can be used by entering its address.
+  SMSGate's own web dashboard is available as a second profile (`smsgate-dashboard`), on `http://localhost:3010`.
 - **Warning when the encryption keys don't match the database.** Saved credentials are encrypted with a key kept
   in the data volume; if the volume is replaced, or another install shares the database with its own key, they
   silently looked "not set up". Now there is a banner for administrators on every page, a startup log warning, and

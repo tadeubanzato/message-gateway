@@ -189,6 +189,13 @@ not when the handset has sent it. The phone's credentials and the server's queue
 private server relays a push notification through SMSGate's public service; the app's SSE mode
 avoids that.
 
+*SMSGate dashboard (optional).* SMSGate has its own web dashboard: the paired phones and whether
+they are online, each message's state on the handset, and the phone's settings. Turn it on by
+setting `COMPOSE_PROFILES=smsgate,smsgate-dashboard` in `.env` and running `docker compose up -d`,
+then open `http://localhost:3010` on the machine that runs the gateway and sign in with the
+username and password the app shows. It listens on that machine only; from another computer use
+an SSH tunnel (`ssh -L 3010:localhost:3010 <that machine>`).
+
 **Default phone number.** On the SMS page, *Channel defaults* lets you set a number (any format,
 country code required). It is used whenever a message doesn't say who to text.
 

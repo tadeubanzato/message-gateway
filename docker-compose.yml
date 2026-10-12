@@ -96,6 +96,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # Optional web dashboard for the SMSGate server above: devices, messages and
+  # their state on the phone. Its own profile, on top of "smsgate":
+  #   COMPOSE_PROFILES=smsgate,smsgate-dashboard
+  # Sign in with the username and password the Android app shows. Bound to this
+  # machine only by default (http://localhost:3010); from another computer, use
+  # an SSH tunnel:  ssh -L 3010:localhost:3010 <this machine>
+  smsgate-dashboard:
+    image: ghcr.io/android-sms-gateway/web-dashboard:v0.5.2
+    profiles: ["smsgate-dashboard"]
+    restart: unless-stopped
+    environment:
+      HTTP__ADDRESS: 0.0.0.0:3000
+      GATEWAY__URL: http://smsgate:3000/api/3rdparty/v1
+    ports:
+      - "${SMSGATE_DASHBOARD_BIND:-127.0.0.1}:${SMSGATE_DASHBOARD_PORT:-3010}:3000"
+    depends_on:
+      - smsgate
+
 volumes:
   gateway_data:
   rabbitmq_data:
