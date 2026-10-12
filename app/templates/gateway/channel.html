@@ -464,6 +464,48 @@
   }
 
   // ---------------- channel-level defaults (SMS default phone number) ----------------
+  // Text commands (SMS only): who may send them to the paired phone, and which are on.
+  function commandsCard() {
+    if (CH !== "sms") return null;
+    const card = el("div", "card");
+    card.innerHTML = `<h3>Text commands</h3>
+      <p class="help" style="margin:0 0 4px">Text a command such as <code>/help</code> to the paired phone and the gateway replies by SMS. Only the numbers below get an answer; anyone else gets no reply at all.</p>
+      <div data-note></div>
+      <label>Phone numbers allowed to send commands (one per line)</label>
+      <textarea data-numbers rows="3" spellcheck="false" autocomplete="off" placeholder="+15551234567"></textarea>
+      <p class="help" style="margin:4px 0 0">With or without the country code: <code>+1 857 707 5969</code> and <code>8577075969</code> both work. A number matches when the sender's number ends with it.</p>
+      <label>Commands</label><div data-commands></div>
+      <div class="actions"><button class="btn" data-save>Save commands</button></div><div data-out></div>`;
+    const ta = $("[data-numbers]", card); ta.style.cssText = "width:100%;font-family:ui-monospace,monospace;font-size:13px";
+    const list = $("[data-commands]", card), note = $("[data-note]", card), out = $("[data-out]", card);
+    const warn = (text) => { const n = el("div", "msg", text); n.style.cssText = "background:var(--warnbg);color:var(--warn);margin:8px 0 0"; note.appendChild(n); };
+    const show = (r) => {
+      ta.value = r.numbers || ""; list.innerHTML = ""; note.innerHTML = "";
+      if (!r.incoming_on) warn("Commands need incoming messages. Connect Android phone (SMSGate) above and turn on Incoming messages.");
+      for (const c of r.commands) {
+        const row = el("label", "row"); row.style.cssText = "margin:6px 0 0;gap:8px;color:var(--fg);font-weight:400;flex-wrap:nowrap;align-items:flex-start";
+        const box = el("input"); box.type = "checkbox"; box.checked = c.enabled; box.dataset.command = c.name; box.style.cssText = "width:auto;margin-top:3px";
+        const text = el("span"); text.append(el("code", "", "/" + c.name), document.createTextNode(" " + c.label));
+        row.append(box, text); list.appendChild(row);
+        if (c.name === "reboot" && !r.reboot_available) {
+          const h = el("p", "help", "Needs a one-time step on the server first: sudo ./host/install-reboot-helper.sh (in the gateway's folder). Until then /reboot replies that it isn't set up.");
+          h.style.margin = "2px 0 0 24px"; list.appendChild(h);
+        }
+      }
+    };
+    post("/gateway/channels/sms/commands", { action: "get" }).then(show).catch(e => say(out, e.message, "err"));
+    $("[data-save]", card).onclick = async (ev) => {
+      const b = ev.target; b.disabled = true;
+      const enabled = Array.from(list.querySelectorAll("input[data-command]")).filter(i => i.checked).map(i => i.dataset.command);
+      try {
+        const r = await post("/gateway/channels/sms/commands", { action: "save", numbers: ta.value, enabled });
+        if (r.ok === false) say(out, r.error || "Could not save.", "err"); else { show(r); say(out, "Saved.", "ok"); }
+      } catch (e) { say(out, e.message, "err"); }
+      finally { b.disabled = false; }
+    };
+    return card;
+  }
+
   function defaultsCard() {
     if (!status.defaults || !status.defaults.length) return null;
     const card = el("div", "card");
@@ -562,6 +604,7 @@
         main.appendChild(tip);
       }
       const dc = defaultsCard(); if (dc) main.appendChild(dc);
+      const tc = commandsCard(); if (tc) main.appendChild(tc);
       const cc = curlCard(connected); if (cc) main.appendChild(cc);
     }
   }

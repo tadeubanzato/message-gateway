@@ -19,7 +19,7 @@ from app.routes.portal import (
     _get_active_apps, _iso, _redirect, _require_account_or_redirect,
     _load_account_from_session, page_ctx, templates,
 )
-from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, key_check, message_log, secret_store, smsgate_server, smsgate_webhooks
+from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, key_check, message_log, secret_store, sms_commands, smsgate_server, smsgate_webhooks
 from app.services.env import public_base_url
 from app.services.phone import normalize_phone
 from app.services.auth_passwords import hash_password, verify_password
@@ -347,6 +347,21 @@ def smsgate_pairing(request: Request):
         "api_url": public_base_url(request) + smsgate_server.MOBILE_PATH + "/v1",
         "private_token": smsgate_server.private_token(),
     }
+
+
+class SmsCommandsBody(BaseModel):
+    action: str = "get"      # get | save
+    numbers: str = ""
+    enabled: list[str] = Field(default_factory=list)
+
+
+@router.post("/gateway/channels/sms/commands", include_in_schema=False)
+def sms_commands_config(request: Request, body: SmsCommandsBody):
+    """Who may send text commands to the paired phone, and which commands are on."""
+    _owner_or_error(request)
+    if body.action == "save":
+        return sms_commands.save_config(body.numbers, body.enabled)
+    return sms_commands.config()
 
 
 class SmsGateWebhooksBody(BaseModel):

@@ -191,6 +191,25 @@ phone* line (sent, delivered or failed), and a text the handset could not send i
 with the reason. The phone posts to an address on the gateway that ends in a random secret; for a
 second check, copy the app's *Settings → Webhooks → Signing key* into *Webhook signing key*.
 
+*Text commands.* With incoming messages on, the **Text commands** card on the SMS page lets chosen
+phone numbers control the gateway by text. List the numbers allowed (one per line, with or without
+the country code - `+1 857 707 5969` and `8577075969` both match the same sender) and tick the
+commands to allow:
+
+| Command | Reply |
+|---|---|
+| `/help` | The commands that are switched on |
+| `/status` | Uptime, load, memory, disk, temperature, public IP and which channels are ready |
+| `/speed` | A download and upload speed test |
+| `/reboot` | Restarts the machine, after a `Y` confirmation. Off by default |
+
+A number that isn't on the list gets no reply at all. Replies are ordinary SMS messages, so they
+appear in the message log. `/reboot` needs one more step, because a container can't restart its
+host: run `sudo ./host/install-reboot-helper.sh` once on the machine. It installs a small systemd
+unit that reboots when the gateway leaves a request file in `host-control/`; that file is the only
+thing the gateway can do to the machine (`--remove` uninstalls it). Bear in mind that a sender's
+number can be faked, so only switch on `/reboot` if a surprise restart is something you can live with.
+
 Good to know: a message is logged as delivered when the SMSGate server accepts it for the phone,
 not when the handset has sent it (turn on incoming messages to see that too). The phone's credentials and the server's queue live in the
 `smsgate_db` volume, separate from the gateway's own database. To wake the phone promptly, a

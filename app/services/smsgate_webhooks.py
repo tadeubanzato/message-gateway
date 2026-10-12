@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.db import get_repository
-from app.services import access, message_log, secret_store
+from app.services import access, message_log, secret_store, sms_commands
 from app.services.env import get_env
 from app.services.sms.smsgate import SmsGateProvider
 
@@ -153,6 +153,9 @@ def _record_received(event: dict[str, Any], payload: dict[str, Any]) -> str:
     if message_log.store_content_enabled():
         doc["body_enc"] = secret_store.encrypt(str(payload.get("message") or ""))
     repo.insert_message(doc)
+    # Only a text seen for the first time can be a command, so a retried webhook never runs one twice.
+    if sms_commands.handle_incoming(doc["from"], str(payload.get("message") or "")):
+        return "command"
     return "stored"
 
 

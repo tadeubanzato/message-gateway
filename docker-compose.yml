@@ -39,6 +39,9 @@ services:
       - ./app/templates:/app/app/templates:ro
       # Where the gateway leaves the bundled SMSGate server its config (see below).
       - smsgate_config:/app/smsgate
+      # Where the /reboot text command leaves its request for the host (it does
+      # nothing unless you install host/install-reboot-helper.sh).
+      - ./host-control:/app/host-control
 
   # ---------------------------------------------------------------------------
   # Optional: send SMS from your own Android phone (https://sms-gate.app).
