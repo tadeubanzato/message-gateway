@@ -111,19 +111,26 @@ def _mbps(byte_count: int, seconds: float) -> float:
 def _cmd_speed(sender: str) -> str:
     """Download and upload against Cloudflare's speed test endpoints. Measured from
     this container, which shares the machine's internet connection."""
-    down_bytes, up_bytes = 100_000_000, 25_000_000   # big enough to mean something on a fast line
+    # The test site refuses very large single downloads, so a fast line gets several
+    # rounds: enough data for the figure to mean something, without making a slow one wait.
+    down_bytes, up_bytes, rounds, enough_secs = 50_000_000, 25_000_000, 4, 4.0
     headers = {"User-Agent": "message-gateway-speedtest"}
     try:
-        req = urllib.request.Request(f"https://speed.cloudflare.com/__down?bytes={down_bytes}", headers=headers)
-        start, got = time.monotonic(), 0
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            first_byte = time.monotonic() - start   # connection setup isn't transfer time
-            while time.monotonic() - start < 15:
-                chunk = resp.read(262144)
-                if not chunk:
-                    break
-                got += len(chunk)
-        down = _mbps(got, time.monotonic() - start - first_byte)
+        got, spent = 0, 0.0
+        for _ in range(rounds):
+            req = urllib.request.Request(f"https://speed.cloudflare.com/__down?bytes={down_bytes}", headers=headers)
+            start = time.monotonic()
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                first_byte = time.monotonic()   # connection setup isn't transfer time
+                while time.monotonic() - start < 15:
+                    chunk = resp.read(262144)
+                    if not chunk:
+                        break
+                    got += len(chunk)
+            spent += time.monotonic() - first_byte
+            if spent >= enough_secs:
+                break
+        down = _mbps(got, spent)
 
         req = urllib.request.Request("https://speed.cloudflare.com/__up", data=os.urandom(up_bytes), method="POST",
                                      headers={**headers, "Content-Type": "application/octet-stream"})

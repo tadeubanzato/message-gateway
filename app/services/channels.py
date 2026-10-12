@@ -116,6 +116,8 @@ CATALOG: dict[str, dict[str, Any]] = {
                      "placeholder": "https://api.sms-gate.app/3rdparty/v1"},
                     {"name": "SMSGATE_DEVICE_ID", "label": "Device ID, to always send from one phone", "optional": True},
                     {"name": "SMSGATE_SIM_NUMBER", "label": "SIM slot (1-3), on a dual-SIM phone", "optional": True, "placeholder": "1"},
+                    {"name": "SMSGATE_DASHBOARD_URL", "label": "SMSGate dashboard address, to link to it from this page", "optional": True,
+                     "placeholder": "http://192.168.1.10:3010"},
                     {"name": "SMSGATE_WEBHOOK_SIGNING_KEY", "label": "Webhook signing key (app: Settings > Webhooks), to verify incoming messages",
                      "secret": True, "optional": True},
                 ],

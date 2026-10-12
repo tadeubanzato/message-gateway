@@ -220,7 +220,8 @@ avoids that.
 they are online, each message's state on the handset, and the phone's settings. Turn it on by
 setting `COMPOSE_PROFILES=smsgate,smsgate-dashboard` in `.env` and running `docker compose up -d`,
 then open `http://localhost:3010` on the machine that runs the gateway and sign in with the
-username and password the app shows. It listens on that machine only; from another computer use
+username and password the app shows. Save its address in *SMSGate dashboard address* on the SMS page
+to get an **Open the SMSGate dashboard** button there. It listens on that machine only; from another computer use
 an SSH tunnel (`ssh -L 3010:localhost:3010 <that machine>`).
 
 **Default phone number.** On the SMS page, *Channel defaults* lets you set a number (any format,

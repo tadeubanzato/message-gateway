@@ -603,6 +603,14 @@
         tip.innerHTML = 'Tip: a message can pick a provider with <code>"provider": "' + connected[0].name + '"</code>. Without it, the default is used.';
         main.appendChild(tip);
       }
+      // A shortcut to SMSGate's own dashboard, when its address has been saved on the provider.
+      const sg = (status.providers || []).find(x => x.name === "smsgate" && x.connected);
+      const dash = sg && (sg.fields.find(f => f.name === "SMSGATE_DASHBOARD_URL") || {}).value;
+      if (dash && /^https?:\/\//i.test(dash)) {
+        const p = el("p"); p.style.margin = "14px 0 0";
+        const a = el("a", "btn ghost sm", "Open the SMSGate dashboard ↗"); a.href = dash; a.target = "_blank"; a.rel = "noopener noreferrer";
+        p.appendChild(a); main.appendChild(p);
+      }
       const dc = defaultsCard(); if (dc) main.appendChild(dc);
       const tc = commandsCard(); if (tc) main.appendChild(tc);
       const cc = curlCard(connected); if (cc) main.appendChild(cc);
