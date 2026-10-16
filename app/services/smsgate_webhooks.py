@@ -72,12 +72,14 @@ def _registered(provider: SmsGateProvider) -> list[dict[str, Any]]:
     return [h for h in hooks if isinstance(h, dict) and str(h.get("id") or "").startswith(_ID_PREFIX)]
 
 
-def status() -> dict[str, Any]:
+def status(public_base: str = "") -> dict[str, Any]:
     try:
         events = sorted(h.get("event") for h in _registered(SmsGateProvider()) if h.get("event"))
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "enabled": False, "error": f"Could not ask the SMSGate server ({type(e).__name__})."}
-    return {"ok": True, "enabled": bool(secret()) and "sms:received" in events, "events": events,
+    enabled = bool(secret()) and "sms:received" in events
+    return {"ok": True, "enabled": enabled, "events": events,
+            "url": f"{public_base}{PATH}/{secret()}" if enabled and public_base else None,
             "signed": bool((get_env("SMSGATE_WEBHOOK_SIGNING_KEY") or "").strip())}
 
 
@@ -98,7 +100,7 @@ def enable(public_base: str) -> dict[str, Any]:
             provider._request("POST", "/webhooks", {"id": _webhook_id(event), "url": url, "event": event})
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"The SMSGate server didn't accept the webhooks ({type(e).__name__}: {e})."}
-    return status()
+    return status(public_base)
 
 
 def disable() -> dict[str, Any]:

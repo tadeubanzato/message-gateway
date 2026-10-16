@@ -378,7 +378,7 @@ def smsgate_webhooks_toggle(request: Request, body: SmsGateWebhooksBody):
         return smsgate_webhooks.enable(public_base_url(request))
     if body.action == "disable":
         return smsgate_webhooks.disable()
-    return smsgate_webhooks.status()
+    return smsgate_webhooks.status(public_base_url(request))
 
 
 @router.post("/gateway/channels/telegram/find-chats", include_in_schema=False)

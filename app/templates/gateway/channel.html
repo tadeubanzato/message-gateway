@@ -224,7 +224,12 @@
         const show = (r) => {
           ib.disabled = false; ib.textContent = r.enabled ? "Turn off" : "Turn on"; ib.dataset.action = r.enabled ? "disable" : "enable";
           is.textContent = r.enabled ? "On" + (r.signed ? ", signatures checked" : "") : "Off";
-          if (r.ok === false && r.error) say(io, r.error, "err"); else io.innerHTML = "";
+          if (r.ok === false && r.error) { say(io, r.error, "err"); return; }
+          io.innerHTML = "";
+          if (r.enabled && r.url) {
+            io.append(el("p", "help", "Registered on the SMSGate server for: " + (r.events || []).join(", ") + ". It is added automatically, so you only need this address if you register the webhook by hand in the SMSGate app or dashboard (keep it private - the secret at the end is what protects it)."),
+              ...copyRow("Webhook URL", r.url));
+          }
         };
         const run = (action) => post("/gateway/channels/sms/smsgate/webhooks", { action }).then(show)
           .catch(e => { ib.disabled = false; ib.textContent = "Try again"; ib.dataset.action = "status"; say(io, e.message, "err"); });
