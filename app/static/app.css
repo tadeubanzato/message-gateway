@@ -98,6 +98,11 @@ th { color:var(--muted); font-weight:600; }
 pre { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px; overflow-x:auto; font-size:13px; margin:8px 0; }
 dialog { border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); color:var(--fg); max-width:420px; width:calc(100% - 40px); }
 dialog::backdrop { background:rgba(0,0,0,.45); }
+/* The test popup's dropdown: same height and look as the text field (the native select ignores the padding). */
+#testDlg input, #testDlg select { box-sizing:border-box; height:42px; line-height:20px; }
+#testDlg select { -webkit-appearance:none; appearance:none; padding-right:36px; cursor:pointer;
+  background-image:linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:calc(100% - 19px) 18px, calc(100% - 14px) 18px; background-size:5px 5px, 5px 5px; background-repeat:no-repeat; }
 
 /* setup wizard */
 .steps { display:flex; gap:8px; margin-bottom:20px; font-size:13px; color:var(--muted); flex-wrap:wrap; }
