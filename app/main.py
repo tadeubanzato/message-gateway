@@ -19,7 +19,8 @@ from app.mcp_server.server import mcp
 from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
 from app.routes.portal_ui import router as portal_ui_router
-from app.services import access, channels, email_templates, html_safe, key_check, message_log
+from app.routes.smsgate_proxy import router as smsgate_proxy_router
+from app.services import access, channels, email_templates, html_safe, key_check, message_log, sms_commands, smsgate_server
 from app.services.env import public_base_url
 from app.version import APP_NAME, APP_VERSION
 from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, TelegramMessage, WhatsAppMessage, MessageRequest, MessageResponse
@@ -56,6 +57,11 @@ def _purge_loop() -> None:
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
     get_repository()  # initializes schema/indexes for whichever backend is active
+    sms_commands.clear_stale_reboot_request()
+    try:
+        smsgate_server.write_config()  # the bundled SMSGate server waits for this file
+    except Exception as e:
+        print(f"[startup] warning: could not write the SMSGate server config: {e!r}")
     try:
         access.ensure_roles()
     except Exception:
@@ -303,6 +309,7 @@ def _validate_email_recipients_or_400(recipients: list[str]) -> None:
 app.include_router(onboarding_router, include_in_schema=False)
 app.include_router(portal_router, include_in_schema=False)
 app.include_router(portal_ui_router, include_in_schema=False)
+app.include_router(smsgate_proxy_router, include_in_schema=False)
 
 
 @app.get("/health", include_in_schema=False, tags=["System"], summary="Health check")

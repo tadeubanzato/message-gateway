@@ -5,8 +5,8 @@ one API. One Docker container, one place to connect your providers, and a full l
 that was sent. You set it up in your browser: there is no config file to edit, and your
 credentials are stored **encrypted** in the database you choose.
 
-- **Five channels, several providers each.** Email (Mailjet, SendGrid), SMS (your own HTTP
-  endpoint, Twilio, Infobip or Sinch), push (Pushover, ntfy), Telegram (a bot you create) and
+- **Five channels, several providers each.** Email (Mailjet, SendGrid), SMS (your own Android
+  phone, your own HTTP endpoint, Twilio, Infobip or Sinch), push (Pushover, ntfy), Telegram (a bot you create) and
   WhatsApp (the official WhatsApp Business Platform). Connect more than one per channel, pick a
   default, or choose per message - and turn any connected provider on or off without disconnecting it.
 - **Dashboard.** A per-channel message trend chart on Home, and a full message log: time,
@@ -89,8 +89,7 @@ The setup page opens automatically. It has three steps:
 You land on the **Home** page, which shows each channel's status. Next, connect a channel.
 
 > Coming from an older install? **Settings → Import from an existing .env file** reads your
-> old `.env`, saves the provider settings it finds (encrypted), and turns old SMS modem
-> settings into a custom SMS endpoint.
+> old `.env` and saves the provider settings it finds (encrypted).
 
 ## 3. Connect your channels
 
@@ -126,6 +125,7 @@ would rather not create a Twilio/Infobip/Sinch account just to try the gateway.
 | Provider | What you need |
 |---|---|
 | **Custom API endpoint** | Your own SMS service. See below |
+| **Android phone (SMSGate)** | An Android phone with a SIM and the SMS Gateway for Android app. See below |
 | **Twilio** | Account SID and auth token (Twilio console), and a Twilio phone number to send from |
 | **Infobip** | API key, your account's base URL and a sender ID (Infobip portal) |
 | **Sinch** | Service Plan ID, an API token, the region your plan was created in (US/EU/AU/BR/CA), and a from number or sender ID (Sinch dashboard) |
@@ -158,6 +158,71 @@ A live preview shows the request with a sample number and message, and **Fill in
 loads a starting point. Placeholders are filled in *inside* the JSON, so quotes or newlines in
 a message can't break the request. The gateway calls your URL from this machine, so it must be
 reachable from where Docker runs.
+
+**Your own Android phone (SMSGate).** Messages are sent by a phone you own, from its own number,
+using the open-source [SMS Gateway for Android](https://sms-gate.app) app. The server the app
+talks to is built into this project and switched on with one option:
+
+```bash
+MG_SMSGATE=1 ./install.sh
+```
+
+That starts three more containers next to the gateway (the SMSGate server, its housekeeping
+worker and a MariaDB database) and remembers the choice in `.env`. None of them publish a port:
+the phone reaches the server *through the gateway*, at `/api/mobile/...` on the gateway's own
+address, and only the gateway calls the server's send API. Then:
+
+1. Install the app on the phone ([instructions](https://docs.sms-gate.app/installation/)).
+2. Open **Channels → SMS → Android phone (SMSGate)**. It shows the **API URL** and **private
+   token** for this gateway. Enter both in the app under *Settings → Cloud Server*.
+3. On the app's *Home* tab, turn on **Cloud server** and tap **Offline** until it says Online.
+4. Enter the **username** and **password** the app now shows into the gateway, and save.
+
+The app only connects over `https`, so the gateway needs a public https address (a reverse proxy
+or a tunnel in front of it); open the SMS page through that address to see the right API URL.
+To use a different SMSGate server instead - for example the public cloud at
+`https://api.sms-gate.app/3rdparty/v1` - skip `MG_SMSGATE` and fill in *Server address*.
+
+*Incoming messages.* Once the phone is connected, **Incoming messages → Turn on** (same page) has
+the phone report to the gateway the texts it receives and what happened to the ones you sent. Received
+texts appear in the **Message log** with the status `received` and the sender's number, and in
+`GET /v1/messages?status=received` for the administrator's API keys. Sent texts gain an *On the
+phone* line (sent, delivered or failed), and a text the handset could not send is marked failed
+with the reason. The phone posts to an address on the gateway that ends in a random secret; for a
+second check, copy the app's *Settings → Webhooks → Signing key* into *Webhook signing key*.
+
+*Text commands.* With incoming messages on, the **Text commands** card on the SMS page lets chosen
+phone numbers control the gateway by text. List the numbers allowed (one per line, with or without
+the country code - `+1 857 707 5969` and `8577075969` both match the same sender) and tick the
+commands to allow:
+
+| Command | Reply |
+|---|---|
+| `/help` | The commands that are switched on |
+| `/status` | Uptime, load, memory, disk, temperature, public IP and which channels are ready |
+| `/speed` | A download and upload speed test |
+| `/reboot` | Restarts the machine, after a `Y` confirmation. Off by default |
+
+A number that isn't on the list gets no reply at all. Replies are ordinary SMS messages, so they
+appear in the message log. `/reboot` needs one more step, because a container can't restart its
+host: run `sudo ./host/install-reboot-helper.sh` once on the machine. It installs a small systemd
+unit that reboots when the gateway leaves a request file in `host-control/`; that file is the only
+thing the gateway can do to the machine (`--remove` uninstalls it). Bear in mind that a sender's
+number can be faked, so only switch on `/reboot` if a surprise restart is something you can live with.
+
+Good to know: a message is logged as delivered when the SMSGate server accepts it for the phone,
+not when the handset has sent it (turn on incoming messages to see that too). The phone's credentials and the server's queue live in the
+`smsgate_db` volume, separate from the gateway's own database. To wake the phone promptly, a
+private server relays a push notification through SMSGate's public service; the app's SSE mode
+avoids that.
+
+*SMSGate dashboard (optional).* SMSGate has its own web dashboard: the paired phones and whether
+they are online, each message's state on the handset, and the phone's settings. Turn it on by
+setting `COMPOSE_PROFILES=smsgate,smsgate-dashboard` in `.env` and running `docker compose up -d`,
+then open `http://localhost:3010` on the machine that runs the gateway and sign in with the
+username and password the app shows. Save its address in *SMSGate dashboard address* on the SMS page
+to get an **Open the SMSGate dashboard** button there. It listens on that machine only; from another computer use
+an SSH tunnel (`ssh -L 3010:localhost:3010 <that machine>`).
 
 **Default phone number.** On the SMS page, *Channel defaults* lets you set a number (any format,
 country code required). It is used whenever a message doesn't say who to text.
@@ -424,6 +489,7 @@ Manage the container from the project folder:
 docker compose stop            # stop
 docker compose start           # start again
 docker compose logs gateway    # see what's happening
+docker compose logs smsgate    # the built-in SMSGate server, if you turned it on
 ./install.sh                   # rebuild after updating (data is kept)
 docker compose down -v         # UNINSTALL: deletes local data and the encryption key
 ```
@@ -452,6 +518,10 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
 - Recipients (emails, phone numbers) are stored in plain text so they can be searched.
   Subjects, bodies and credentials are encrypted.
 - The gateway calls provider APIs, and your custom SMS URL, from your machine.
+- With the built-in SMSGate server on, `/api/mobile/...` is forwarded to it without a gateway
+  login, and so is `/api/smsgate/webhook/<secret>` (where the phone reports incoming texts, only
+  with the secret in the address): that is the phone app's own API, protected by the private token (to register a phone)
+  and by each phone's own token after that. The server's send API is not reachable from outside.
 
 ## 8. Troubleshooting
 
@@ -466,6 +536,9 @@ docker compose down -v         # UNINSTALL: deletes local data and the encryptio
 | A send returns "… is turned off on the gateway" | That provider is connected but switched off - click its Enabled/Disabled pill on the Channels page to turn it back on, or pick a different connected provider with `"provider"` |
 | Mail is rejected | The sender address must be verified with Mailjet/SendGrid |
 | SMS says "failed" with your endpoint | Check the URL, headers and body preview; add or fix the "response must contain" text |
+| The SMS page says the built-in SMSGate server isn't running | Start it with `MG_SMSGATE=1 ./install.sh`, then `docker compose logs smsgate` if it still isn't up |
+| The Android app stays Offline | The API URL must be `https://<your gateway>/api/mobile/v1` and the private token must match the one on the SMS page |
+| SMSGate messages are "delivered" in the log but never arrive | The server queued them but the phone hasn't picked them up: check the app says Online and that the phone has signal |
 | Telegram "Find chat IDs" shows nothing | Open your bot in Telegram and send it any message first - bots can't message someone who hasn't messaged them |
 | Telegram send fails ("chat not found" / "bot was blocked") | The chat ID is wrong, or that user blocked/never started the bot - use **Find chat IDs** to get a fresh one |
 | Gakai: "rejected the token" when loading accounts | The token is wrong, was regenerated, or the address points at something else. In Docker, `localhost` is translated for you; otherwise use an address the gateway can reach |
@@ -532,9 +605,12 @@ app/
   main.py            FastAPI app: messages API, mounts the MCP server
   bootstrap.py       auto-generated keys and the DB choice (in the data volume)
   db/                repository interface + sqlite / atlas backends
-  routes/            first-run setup, login and keys, portal pages
+  routes/            first-run setup, login and keys, portal pages,
+                     and the pass-through for the SMSGate phone app (/api/mobile)
   services/          channels, encrypted settings, message log, providers
     sms/custom_http  your own SMS endpoint (URL, headers, JSON pattern)
+    sms/smsgate      your own Android phone, through an SMSGate server
+    smsgate_server   the built-in SMSGate server: its private token and config file
     sms/sinch, twilio, infobip  the other SMS providers
     telegram/bot_api  Telegram Bot API (send, check token, find chat ids)
     whatsapp/cloud_api  WhatsApp Business Platform / Meta Cloud API

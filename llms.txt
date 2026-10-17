@@ -105,7 +105,10 @@ Tell the user, in your own words:
     that provider's sign-in page. For SMS through their own service, they pick
     "Custom API endpoint" (the default) and either paste a working curl command
     for it and click "Fill in from curl", or give the URL and a sample JSON body
-    themselves. For Telegram, they message @BotFather in Telegram, send /newbot,
+    themselves. To text from their own Android phone instead, install with
+    `MG_SMSGATE=1 ./install.sh`, then they pick "Android phone (SMSGate)" on the
+    SMS page and follow the pairing steps shown there (needs the gateway on a
+    public https address). For Telegram, they message @BotFather in Telegram, send /newbot,
     and paste the token it gives back - then click "Find chat IDs" on the
     Telegram page to look up who to notify (Telegram bots can't message someone
     who hasn't messaged the bot first). For WhatsApp, they need a Meta developer
@@ -126,7 +129,8 @@ Tell the user, in your own words:
 Then wait for the user to say they are done. If they ask which provider to pick:
 Pushover or ntfy for push (ntfy needs no account), Mailjet or SendGrid for email,
 Twilio, Infobip or Sinch for SMS if they want a hosted provider (Custom API
-endpoint if they already have their own SMS service), Telegram if they just want
+endpoint if they already have their own SMS service, or Android phone (SMSGate)
+to text from a phone and SIM they own), Telegram if they just want
 a free bot with no phone number or account beyond Telegram itself, or WhatsApp
 only if they specifically need WhatsApp and are prepared for the Meta developer
 setup and the 24-hour-window limitation.

@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 data/
+host-control/
 *.db
 bootstrap.json
 

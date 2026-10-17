@@ -6,6 +6,7 @@ from app.services.sms.base import SmsProvider
 
 PROVIDER_REGISTRY = {
     "custom_http": "app.services.sms.custom_http:CustomHttpProvider",
+    "smsgate": "app.services.sms.smsgate:SmsGateProvider",
     "twilio": "app.services.sms.twilio:TwilioProvider",
     "infobip": "app.services.sms.infobip:InfobipProvider",
     "sinch": "app.services.sms.sinch:SinchProvider",

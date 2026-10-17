@@ -6,11 +6,17 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [0.2.0] - Unreleased
 
+### Removed
+- **The "local modem" `.env` import.** Importing an old `.env` no longer turns `SMS_API_BASE_URL` / `SMS_API_TOKEN`
+  into a custom SMS endpoint. Set the endpoint up under Channels > SMS instead.
+
 ### Changed
 - **The API reference moved to `/api/docs`** (its OpenAPI file to `/api/openapi.json`). `/scalar` and `/docs`
   are gone, so there is one place for the API documentation.
 
 ### Fixed
+- **Addresses shown behind an https proxy or tunnel now say `https`.** The gateway showed `http://` for its own
+  address (the MCP URL, API examples) when a proxy terminated https in front of it, unless a public address was set.
 - **`context` values are made HTML-safe by the gateway** in HTML emails. Plain text is escaped and line breaks become
   `<br>`; text an upstream tool already escaped is not double-escaped; only simple formatting tags and safe links survive.
   A key ending in `_html` is inserted as is. Callers no longer need to escape anything.
@@ -19,6 +25,16 @@ project uses [Semantic Versioning](https://semver.org/).
   when a template is rendered, so templates saved earlier are cleaned without re-saving.
 
 ### Added
+- **Send SMS from your own Android phone.** A new SMS provider, *Android phone (SMSGate)*, sends through the
+  open-source SMS Gateway for Android app. `MG_SMSGATE=1 ./install.sh` starts an SMSGate server alongside the gateway
+  (three extra containers behind a compose profile, no extra ports); the phone reaches it through the gateway at
+  `/api/mobile/...`, so one public address is enough. **Channels > SMS** shows the API URL and private token to
+  enter in the app. Another SMSGate server, such as the public cloud, can be used by entering its address.
+  **Incoming messages**: the phone can report received texts and delivery results to the gateway; received texts
+  show in the message log (status `received`) and the API, and sent ones show what the handset did with them.
+  **Text commands**: allowed numbers can text `/help`, `/status`, `/speed` or `/reboot` to the phone and get the
+  answer by SMS; numbers and commands are chosen on the SMS page, and `/reboot` needs `host/install-reboot-helper.sh`.
+  SMSGate's own web dashboard is available as a second profile (`smsgate-dashboard`), on `http://localhost:3010`.
 - **Warning when the encryption keys don't match the database.** Saved credentials are encrypted with a key kept
   in the data volume; if the volume is replaced, or another install shares the database with its own key, they
   silently looked "not set up". Now there is a banner for administrators on every page, a startup log warning, and

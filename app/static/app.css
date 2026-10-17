@@ -73,6 +73,7 @@ input:focus, select:focus { outline:2px solid var(--link); outline-offset:1px; }
 .badge.ready, .badge.delivered { color:var(--ok); background:var(--okbg); }
 .badge.needs_attention, .badge.queued { color:var(--warn); background:var(--warnbg); }
 .badge.failed { color:var(--err); background:var(--errbg); }
+.badge.received { color:var(--link); background:transparent; border:1px solid var(--link); }
 .badge.not_set_up { color:var(--muted); background:var(--bg); border:1px solid var(--line); }
 .badge.disabled { color:var(--err); background:var(--errbg); }
 /* a badge that's also a button (the Enabled/Disabled pill): looks identical, just clickable */

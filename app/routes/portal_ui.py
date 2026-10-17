@@ -19,7 +19,7 @@ from app.routes.portal import (
     _get_active_apps, _iso, _redirect, _require_account_or_redirect,
     _load_account_from_session, page_ctx, templates,
 )
-from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, key_check, message_log, secret_store
+from app.services import access, cf_access, channels, db_switch, dispatch, email_templates, key_check, message_log, secret_store, sms_commands, smsgate_server, smsgate_webhooks
 from app.services.env import public_base_url
 from app.services.phone import normalize_phone
 from app.services.auth_passwords import hash_password, verify_password
@@ -336,6 +336,49 @@ def gakai_list_accounts(request: Request, body: GakaiAccountsBody):
     token never has to be usable from the browser."""
     _owner_or_error(request)
     return channels.gakai_accounts(body.url, body.token)
+
+
+@router.post("/gateway/channels/sms/smsgate/pairing", include_in_schema=False)
+def smsgate_pairing(request: Request):
+    """What to type into the phone app to pair it with the bundled SMSGate server."""
+    _owner_or_error(request)
+    return {
+        "running": smsgate_server.is_running(),
+        "api_url": public_base_url(request) + smsgate_server.MOBILE_PATH + "/v1",
+        "private_token": smsgate_server.private_token(),
+    }
+
+
+class SmsCommandsBody(BaseModel):
+    action: str = "get"      # get | save
+    numbers: str = ""
+    enabled: list[str] = Field(default_factory=list)
+
+
+@router.post("/gateway/channels/sms/commands", include_in_schema=False)
+def sms_commands_config(request: Request, body: SmsCommandsBody):
+    """Who may send text commands to the paired phone, and which commands are on."""
+    _owner_or_error(request)
+    if body.action == "save":
+        return sms_commands.save_config(body.numbers, body.enabled)
+    return sms_commands.config()
+
+
+class SmsGateWebhooksBody(BaseModel):
+    action: str = "status"   # status | enable | disable
+
+
+@router.post("/gateway/channels/sms/smsgate/webhooks", include_in_schema=False)
+def smsgate_webhooks_toggle(request: Request, body: SmsGateWebhooksBody):
+    """Have the paired phone report incoming texts and delivery results to this gateway."""
+    _owner_or_error(request)
+    if not channels.provider_connected("sms", "smsgate"):
+        return {"ok": False, "enabled": False, "error": "Save the phone's username and password first."}
+    if body.action == "enable":
+        return smsgate_webhooks.enable(public_base_url(request))
+    if body.action == "disable":
+        return smsgate_webhooks.disable()
+    return smsgate_webhooks.status(public_base_url(request))
 
 
 @router.post("/gateway/channels/telegram/find-chats", include_in_schema=False)

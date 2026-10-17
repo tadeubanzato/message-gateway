@@ -5,6 +5,7 @@ Bootstrap settings: the few values that cannot live in the database itself.
 - token_hmac_secret  secret used to HMAC-hash API tokens
 - db_backend         "sqlite" or "atlas"
 - mongodb_uri/_db    Atlas connection details (only when db_backend="atlas")
+- smsgate_private_token  what a phone presents to register with the bundled SMSGate server
 
 They are stored in a JSON file inside the data volume, created automatically
 on first start (mode 0600), so a fresh install needs no manual configuration.
@@ -37,6 +38,7 @@ _ENV_OVERRIDES = {
     "db_backend": "DB_BACKEND",
     "mongodb_uri": "MONGODB_URI",
     "mongodb_db": "MONGODB_DB",
+    "smsgate_private_token": "SMSGATE_PRIVATE_TOKEN",
 }
 
 _cache: dict[str, Any] = {"mtime": None, "data": None}
@@ -49,6 +51,7 @@ def _generate_defaults() -> dict[str, Any]:
         "db_backend": "sqlite",
         "mongodb_uri": "",
         "mongodb_db": "relay_gateway",
+        "smsgate_private_token": secrets.token_urlsafe(24),
     }
 
 

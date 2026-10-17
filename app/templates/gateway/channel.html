@@ -118,7 +118,7 @@
     }
     const val = (suffix) => { const f = p.fields.find(x => x.name.endsWith(suffix) && x.value); return f ? f.value : null; };
     return (val("FROM_EMAIL") && "Sends from " + val("FROM_EMAIL")) || (val("FROM_NUMBER") && "Sends from " + val("FROM_NUMBER")) ||
-      (val("_TOPIC") && "Topic: " + val("_TOPIC")) || (val("SMS_URL") && "Endpoint: " + val("SMS_URL")) || (val("INFOBIP_FROM") && "Sender: " + val("INFOBIP_FROM")) || "Credentials saved";
+      (val("_TOPIC") && "Topic: " + val("_TOPIC")) || (val("SMS_URL") && "Endpoint: " + val("SMS_URL")) || (val("SMSGATE_USERNAME") && "Phone account: " + val("SMSGATE_USERNAME")) || (val("INFOBIP_FROM") && "Sender: " + val("INFOBIP_FROM")) || "Credentials saved";
   }
 
   // ---------------- the setup form for ONE provider ----------------
@@ -177,6 +177,65 @@
           else say(out, "Filled in below, but we couldn't tell which part of the body is the phone number, message or message ID - add {% raw %}{{to}}, {{message}} and {{message_id}}{% endraw %} yourself.", "err");
         } catch (e) { say(out, "Couldn't read that: " + e.message, "err"); }
       };
+    }
+    if (spec.smsgate_pairing) {
+      const pw = el("div"); pw.style.cssText = "background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0 16px";
+      const pl = el("label", "", "Pair your phone with this gateway"); pl.style.marginTop = "0";
+      const body = el("div"); body.append(el("p", "help", "Checking the built-in SMSGate server…"));
+      pw.append(pl, body); fields.appendChild(pw);
+      const copyRow = (label, value) => {
+        const l = el("label", "", label);
+        const row = el("div", "row"); row.style.cssText = "gap:8px;flex-wrap:nowrap";
+        const code = el("code", "", value); code.style.cssText = "flex:1;overflow-wrap:anywhere;user-select:all";
+        const b = el("button", "btn ghost sm", "Copy"); b.type = "button";
+        b.onclick = async () => { try { await navigator.clipboard.writeText(value); b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy"; }, 1500); } catch (e) { /* select-all on the value still works */ } };
+        row.append(code, b);
+        return [l, row];
+      };
+      post("/gateway/channels/sms/smsgate/pairing", {}).then(r => {
+        body.innerHTML = "";
+        if (!r.running) {
+          body.append(el("p", "help", "The built-in SMSGate server isn't running. Start it on the machine that runs this gateway, then reload this page:"));
+          const pre = el("pre"); pre.style.margin = "0 0 8px"; pre.appendChild(el("code", "", "MG_SMSGATE=1 ./install.sh"));
+          body.append(pre, el("p", "help", "Using another SMSGate server instead (for example the public cloud)? Skip this and fill in its address below."));
+          return;
+        }
+        const steps = el("ol", "help"); steps.style.cssText = "margin:0 0 4px;padding-left:18px";
+        ["In the app, open Settings > Cloud Server and enter the API URL and private token below.",
+         "On the Home tab, turn on Cloud server and tap the Offline button until it says Online.",
+         "Enter the username and password the app now shows on its Home tab in the fields below, and save."]
+          .forEach(t => steps.appendChild(el("li", "", t)));
+        body.append(steps, ...copyRow("API URL", r.api_url), ...copyRow("Private token", r.private_token));
+        if (!r.api_url.startsWith("https://")) {
+          const w = el("div", "msg", "The app only connects over https. Open this page through your gateway's public https address (or set it under Settings > Public address) to see the URL to use.");
+          w.style.cssText = "background:var(--warnbg);color:var(--warn);margin:10px 0 0"; body.appendChild(w);
+        }
+      }).catch(() => { body.innerHTML = ""; body.append(el("p", "help", "Couldn't check the built-in SMSGate server. Reload the page to try again.")); });
+
+      if (p.connected) {   // incoming texts and delivery results: the phone reports them to this gateway
+        const iw = el("div"); iw.style.cssText = pw.style.cssText;
+        const il = el("label", "", "Incoming messages"); il.style.marginTop = "0";
+        const ih = el("p", "help", "Have the phone report the texts it receives, and whether the ones you send were sent, delivered or failed. They appear in the Message log.");
+        ih.style.margin = "0 0 8px";
+        const ir = el("div", "row"); const ib = el("button", "btn ghost sm", "Checking…"); ib.type = "button"; ib.disabled = true;
+        const is = el("span", "muted"); ir.append(ib, is);
+        const io = el("div");
+        iw.append(il, ih, ir, io); fields.appendChild(iw);
+        const show = (r) => {
+          ib.disabled = false; ib.textContent = r.enabled ? "Turn off" : "Turn on"; ib.dataset.action = r.enabled ? "disable" : "enable";
+          is.textContent = r.enabled ? "On" + (r.signed ? ", signatures checked" : "") : "Off";
+          if (r.ok === false && r.error) { say(io, r.error, "err"); return; }
+          io.innerHTML = "";
+          if (r.enabled && r.url) {
+            io.append(el("p", "help", "Registered on the SMSGate server for: " + (r.events || []).join(", ") + ". It is added automatically, so you only need this address if you register the webhook by hand in the SMSGate app or dashboard (keep it private - the secret at the end is what protects it)."),
+              ...copyRow("Webhook URL", r.url));
+          }
+        };
+        const run = (action) => post("/gateway/channels/sms/smsgate/webhooks", { action }).then(show)
+          .catch(e => { ib.disabled = false; ib.textContent = "Try again"; ib.dataset.action = "status"; say(io, e.message, "err"); });
+        ib.onclick = () => { ib.disabled = true; run(ib.dataset.action || "status"); };
+        run("status");
+      }
     }
     for (const f of spec.fields) {
       const l = el("label", "", f.label + (f.optional ? " (optional)" : ""));
@@ -256,7 +315,12 @@
         if (![...rowsEl.querySelectorAll("[data-gdefault]")].some(x => x.checked)) { const f = rowsEl.querySelector("[data-gcheck]:checked"); if (f) $("[data-gdefault]", f.closest("[data-id]")).checked = true; }
       };
       const load = async () => {
-        if (!url.value.trim() || !tok.value.trim()) { if (!(p.accounts || []).length) say(out, "Enter the Gakai address and token, then your accounts load.", "err"); return; }
+        // A saved token is never shown again, so the field is empty after saving. Then the gateway uses the saved
+        // one - but only for the saved address, so it can never be sent to a different server.
+        const norm = v => (v || "").trim().replace(/\/+$/, "");
+        const savedTokenUsable = !!(state.GAKAI_LIST_TOKEN || {}).set && norm(url.value) === norm((state.GAKAI_URL || {}).value);
+        if (!url.value.trim()) { say(out, "Enter the Gakai address, then your accounts load.", "err"); return; }
+        if (!tok.value.trim() && !savedTokenUsable) { say(out, "Enter the Gakai token, then your accounts load.", "err"); return; }
         lb.disabled = true; lb.textContent = "Loading…";
         try {
           const r = await post("/gateway/channels/whatsapp/gakai/accounts", { url: url.value.trim(), token: tok.value.trim() });
@@ -410,6 +474,48 @@
   }
 
   // ---------------- channel-level defaults (SMS default phone number) ----------------
+  // Text commands (SMS only): who may send them to the paired phone, and which are on.
+  function commandsCard() {
+    if (CH !== "sms") return null;
+    const card = el("div", "card");
+    card.innerHTML = `<h3>Text commands</h3>
+      <p class="help" style="margin:0 0 4px">Text a command such as <code>/help</code> to the paired phone and the gateway replies by SMS. Only the numbers below get an answer; anyone else gets no reply at all.</p>
+      <div data-note></div>
+      <label>Phone numbers allowed to send commands (one per line)</label>
+      <textarea data-numbers rows="3" spellcheck="false" autocomplete="off" placeholder="+15551234567"></textarea>
+      <p class="help" style="margin:4px 0 0">With or without the country code: <code>+1 857 707 5969</code> and <code>8577075969</code> both work. A number matches when the sender's number ends with it.</p>
+      <label>Commands</label><div data-commands></div>
+      <div class="actions"><button class="btn" data-save>Save commands</button></div><div data-out></div>`;
+    const ta = $("[data-numbers]", card); ta.style.cssText = "width:100%;font-family:ui-monospace,monospace;font-size:13px";
+    const list = $("[data-commands]", card), note = $("[data-note]", card), out = $("[data-out]", card);
+    const warn = (text) => { const n = el("div", "msg", text); n.style.cssText = "background:var(--warnbg);color:var(--warn);margin:8px 0 0"; note.appendChild(n); };
+    const show = (r) => {
+      ta.value = r.numbers || ""; list.innerHTML = ""; note.innerHTML = "";
+      if (!r.incoming_on) warn("Commands need incoming messages. Connect Android phone (SMSGate) above and turn on Incoming messages.");
+      for (const c of r.commands) {
+        const row = el("label", "row"); row.style.cssText = "margin:6px 0 0;gap:8px;color:var(--fg);font-weight:400;flex-wrap:nowrap;align-items:flex-start";
+        const box = el("input"); box.type = "checkbox"; box.checked = c.enabled; box.dataset.command = c.name; box.style.cssText = "width:auto;margin-top:3px";
+        const text = el("span"); text.append(el("code", "", "/" + c.name), document.createTextNode(" " + c.label));
+        row.append(box, text); list.appendChild(row);
+        if (c.name === "reboot" && !r.reboot_available) {
+          const h = el("p", "help", "Needs a one-time step on the server first: sudo ./host/install-reboot-helper.sh (in the gateway's folder). Until then /reboot replies that it isn't set up.");
+          h.style.margin = "2px 0 0 24px"; list.appendChild(h);
+        }
+      }
+    };
+    post("/gateway/channels/sms/commands", { action: "get" }).then(show).catch(e => say(out, e.message, "err"));
+    $("[data-save]", card).onclick = async (ev) => {
+      const b = ev.target; b.disabled = true;
+      const enabled = Array.from(list.querySelectorAll("input[data-command]")).filter(i => i.checked).map(i => i.dataset.command);
+      try {
+        const r = await post("/gateway/channels/sms/commands", { action: "save", numbers: ta.value, enabled });
+        if (r.ok === false) say(out, r.error || "Could not save.", "err"); else { show(r); say(out, "Saved.", "ok"); }
+      } catch (e) { say(out, e.message, "err"); }
+      finally { b.disabled = false; }
+    };
+    return card;
+  }
+
   function defaultsCard() {
     if (!status.defaults || !status.defaults.length) return null;
     const card = el("div", "card");
@@ -507,7 +613,16 @@
         tip.innerHTML = 'Tip: a message can pick a provider with <code>"provider": "' + connected[0].name + '"</code>. Without it, the default is used.';
         main.appendChild(tip);
       }
+      // A shortcut to SMSGate's own dashboard, when its address has been saved on the provider.
+      const sg = (status.providers || []).find(x => x.name === "smsgate" && x.connected);
+      const dash = sg && (sg.fields.find(f => f.name === "SMSGATE_DASHBOARD_URL") || {}).value;
+      if (dash && /^https?:\/\//i.test(dash)) {
+        const p = el("p"); p.style.margin = "14px 0 0";
+        const a = el("a", "btn ghost sm", "Open the SMSGate dashboard ↗"); a.href = dash; a.target = "_blank"; a.rel = "noopener noreferrer";
+        p.appendChild(a); main.appendChild(p);
+      }
       const dc = defaultsCard(); if (dc) main.appendChild(dc);
+      const tc = commandsCard(); if (tc) main.appendChild(tc);
       const cc = curlCard(connected); if (cc) main.appendChild(cc);
     }
   }

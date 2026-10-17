@@ -14,6 +14,8 @@
 #                      from your network, since your browser is on another computer.
 #                      Anything else (your laptop) is this machine only.
 #   MG_NO_OPEN=1       don't open the browser automatically
+#   MG_SMSGATE=1       also start the built-in SMSGate server, to send SMS from
+#                      your own Android phone (remembered for later runs)
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
@@ -52,6 +54,15 @@ export MG_SETUP_TOKEN="${MG_SETUP_TOKEN:-}"
 
 say()  { printf '%s\n' "$*"; }
 fail() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
+
+# The SMSGate server is a compose profile. Remember the choice in .env, so a plain
+# `docker compose up -d` (or the next ./install.sh) keeps it running.
+if [ "${MG_SMSGATE:-}" = "1" ] && ! grep -Eq '^COMPOSE_PROFILES=.*smsgate' .env 2>/dev/null; then
+  if grep -q '^COMPOSE_PROFILES=' .env 2>/dev/null; then
+    fail "COMPOSE_PROFILES is already set in .env. Add smsgate to it (comma separated) and run ./install.sh again."
+  fi
+  printf 'COMPOSE_PROFILES=smsgate\n' >> .env
+fi
 
 # ---- 1. prerequisites -------------------------------------------------------
 command -v docker >/dev/null 2>&1 || fail "Docker is not installed. Install Docker Desktop (https://www.docker.com/products/docker-desktop/), start it, then run ./install.sh again."
