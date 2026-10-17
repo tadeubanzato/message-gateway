@@ -31,7 +31,7 @@
     {% if is_owner %}
       <div class="actions">
         {% if c.connected %}
-          <button class="btn sm" data-test-channel="{{ c.channel }}" data-test-label="{{ c.label }}" data-default="{{ c.default }}" data-providers='{{ c.connected | tojson }}'>Send test</button>
+          <button class="btn sm" data-test-channel="{{ c.channel }}" data-test-label="{{ c.label }}" data-default="{{ c.default }}" data-providers='{{ c.connected | tojson }}' data-apps='{{ c.test_apps | tojson }}'>Send test</button>
           <a class="btn ghost sm" href="/gateway/channels/{{ c.channel }}">{{ 'Manage' if c.state == 'ready' else 'Fix' }}</a>
         {% else %}
           <a class="btn sm" href="/gateway/channels/{{ c.channel }}">Set up</a>
