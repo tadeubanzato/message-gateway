@@ -1,0 +1,14 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+*.apk
+*.aab
+keystore*.jks
+.kotlin/
+captures/
+
+# The repository's root .gitignore skips any folder named data/ (local databases). This app has a source package
+# with that name (the Room database), so it is let back in here.
+!data/
