@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The artwork, with its gradient extended so it stays inside the launcher's safe zone. -->
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@android:color/transparent" />
+    <!-- Themed (monochrome) icon, used when the user picks Material You icons. -->
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

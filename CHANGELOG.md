@@ -25,6 +25,11 @@ project uses [Semantic Versioning](https://semver.org/).
   when a template is rendered, so templates saved earlier are cleaned without re-saving.
 
 ### Added
+- **An Android app for the SMSGate phone, in `sms-app/`.** A Kotlin / Jetpack Compose app that turns a phone into an
+  SMS gateway and works with the SMSGate server this gateway already uses, so the gateway needs no change: put the
+  app's username and password in the SMSGate fields. It has a local API on the phone, a cloud mode over the server's
+  event stream, signed webhooks, an activity chart, and green / amber / red status at a glance. Build and setup steps
+  are in `sms-app/README.md`.
 - **Send SMS from your own Android phone.** A new SMS provider, *Android phone (SMSGate)*, sends through the
   open-source SMS Gateway for Android app. `MG_SMSGATE=1 ./install.sh` starts an SMSGate server alongside the gateway
   (three extra containers behind a compose profile, no extra ports); the phone reaches it through the gateway at

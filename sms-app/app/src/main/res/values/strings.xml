@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Message Gateway SMS</string>
+    <string name="channel_server">API server</string>
+    <string name="notification_title">SMS gateway is running</string>
+    <string name="notification_local">Local API on port %1$d</string>
+    <string name="notification_cloud">Cloud</string>
+    <string name="action_stop">Stop</string>
+</resources>
