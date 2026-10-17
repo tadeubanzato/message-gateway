@@ -1,0 +1,3 @@
+# The Android app has nothing to do with the gateway image: keep it out of the build context, so changes to the app
+# never trigger a gateway rebuild and its source isn't copied into the image by `COPY . /app`.
+sms-app/
