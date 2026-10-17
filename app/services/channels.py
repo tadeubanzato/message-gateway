@@ -611,6 +611,14 @@ def channel_status(channel: str) -> dict[str, Any]:
         else:
             state = "ready_degraded"
     default_info = spec["providers"].get(default)
+    providers = [provider_status(channel, n) for n in spec["providers"]]
+    # What the "Send test" popup lets you pick the sender from: Pushover apps, or Gakai accounts.
+    test_apps: list[dict[str, Any]] = []
+    for p in providers:
+        if p.get("apps"):
+            test_apps = p["apps"]
+        elif p.get("accounts"):
+            test_apps = [{"name": a["id"], "label": a["label"], "set": a["set"], "is_default": a["is_default"]} for a in p["accounts"]]
     return {
         "channel": channel, "label": CHANNEL_LABELS[channel], "state": state,
         # Text and badge color computed once here, not duplicated per template -
@@ -619,7 +627,7 @@ def channel_status(channel: str) -> dict[str, Any]:
         "state_label": STATE_LABEL[state], "state_css": STATE_CSS[state],
         "default": default, "default_label": default_info["label"] if default_info else default,
         "connected": [{"name": n, "label": spec["providers"][n]["label"]} for n in connected],
-        "providers": [provider_status(channel, n) for n in spec["providers"]],
+        "providers": providers, "test_apps": test_apps,
         "defaults": channel_defaults(channel),
     }
 

@@ -54,7 +54,7 @@
 
   document.addEventListener("click", function (e) {
     var b = e.target.closest("[data-test-channel]"); if (!b) return;
-    openTest(b.dataset.testChannel, b.dataset.testLabel, JSON.parse(b.dataset.providers || "[]"), b.dataset.default || "", b.dataset.provider || "");
+    openTest(b.dataset.testChannel, b.dataset.testLabel, JSON.parse(b.dataset.providers || "[]"), b.dataset.default || "", b.dataset.provider || "", JSON.parse(b.dataset.apps || "[]"));
   });
   window.MG = { post: post, say: say, openTest: openTest };
 })();
