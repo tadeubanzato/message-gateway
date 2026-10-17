@@ -315,7 +315,12 @@
         if (![...rowsEl.querySelectorAll("[data-gdefault]")].some(x => x.checked)) { const f = rowsEl.querySelector("[data-gcheck]:checked"); if (f) $("[data-gdefault]", f.closest("[data-id]")).checked = true; }
       };
       const load = async () => {
-        if (!url.value.trim() || !tok.value.trim()) { if (!(p.accounts || []).length) say(out, "Enter the Gakai address and token, then your accounts load.", "err"); return; }
+        // A saved token is never shown again, so the field is empty after saving. Then the gateway uses the saved
+        // one - but only for the saved address, so it can never be sent to a different server.
+        const norm = v => (v || "").trim().replace(/\/+$/, "");
+        const savedTokenUsable = !!(state.GAKAI_LIST_TOKEN || {}).set && norm(url.value) === norm((state.GAKAI_URL || {}).value);
+        if (!url.value.trim()) { say(out, "Enter the Gakai address, then your accounts load.", "err"); return; }
+        if (!tok.value.trim() && !savedTokenUsable) { say(out, "Enter the Gakai token, then your accounts load.", "err"); return; }
         lb.disabled = true; lb.textContent = "Loading…";
         try {
           const r = await post("/gateway/channels/whatsapp/gakai/accounts", { url: url.value.trim(), token: tok.value.trim() });
