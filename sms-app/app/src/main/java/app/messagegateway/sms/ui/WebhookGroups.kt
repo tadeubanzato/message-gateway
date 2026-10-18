@@ -17,12 +17,14 @@ data class WebhookGroup(
     val fromServer: Boolean get() = source == "Cloud"
     val hasDuplicates: Boolean get() = events.any { it.count > 1 }
 
-    private fun hostOf(url: String) = try { java.net.URI(url).host ?: url } catch (_: Exception) { url }
+    private fun hostOf(url: String) = WebhookGroups.hostOf(url)
 }
 
 object WebhookGroups {
     private val known = listOf("sms:received", "sms:sent", "sms:delivered", "sms:failed")
     private val tokenLike = Regex("[A-Za-z0-9_-]{16,}")
+
+    fun hostOf(url: String): String = try { java.net.URI(url).host ?: url } catch (_: Exception) { url }
 
     fun label(event: String): String = when (event) {
         "sms:received" -> "Received"

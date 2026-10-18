@@ -13,7 +13,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -56,33 +58,79 @@ fun SectionCard(title: String, modifier: Modifier = Modifier, content: @Composab
     }
 }
 
-/** A label and a value, with a button to copy the value. */
+/** A label and a value, with a clipboard icon to copy the value and an optional [extra] icon before it. */
 @Composable
-fun CopyRow(label: String, value: String, context: Context, mono: Boolean = true, copyValue: String = value) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+fun CopyRow(
+    label: String,
+    value: String,
+    context: Context,
+    mono: Boolean = true,
+    copyValue: String = value,
+    extra: @Composable () -> Unit = {},
+) {
+    // The icons sit on the value's line, not centred against label + value together.
+    Column(Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 value,
+                Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
                 fontFamily = if (mono) FontFamily.Monospace else null,
             )
+            extra()
+            SmallIconButton(ClipboardIcon, "Copy $label") { copyToClipboard(context, label, copyValue) }
         }
-        TextButton(onClick = { copyToClipboard(context, label, copyValue) }) { Text("Copy") }
     }
 }
 
+/**
+ * One color per meaning, everywhere in the app: amber waiting, slate sent, green delivered, red failed,
+ * blue received, purple command, teal from the server, grey for the rest.
+ */
 @Composable
 fun StateChip(state: ProcessingState) {
     val scheme = MaterialTheme.colorScheme
+    val status = LocalStatusPalette.current
     val (container, content) = when (state) {
-        ProcessingState.Pending -> scheme.tertiaryContainer to scheme.onTertiaryContainer
-        ProcessingState.Processed, ProcessingState.Sent -> scheme.secondaryContainer to scheme.onSecondaryContainer
-        ProcessingState.Delivered -> scheme.primaryContainer to scheme.onPrimaryContainer
-        ProcessingState.Failed -> scheme.errorContainer to scheme.onErrorContainer
+        ProcessingState.Pending -> status.warn.container to status.warn.onContainer
+        ProcessingState.Processed, ProcessingState.Sent -> { OriginTag(Origin.Sent, state.name); return }
+        ProcessingState.Delivered -> status.good.container to status.good.onContainer
+        ProcessingState.Failed -> status.bad.container to status.bad.onContainer
         ProcessingState.Cancelled -> scheme.surfaceVariant to scheme.onSurfaceVariant
     }
-    Pill(state.name, container, content)
+    Tag(state.name, container, content)
+}
+
+/** Where a message travelled, as a tag: its own hue, or neutral when the kind says nothing worth highlighting. */
+enum class Origin(val label: String) { Sent("Sent"), Received("Received"), Command("Command"), Server("Server"), Local("Local"), Sim("") }
+
+@Composable
+fun OriginTag(origin: Origin, text: String = origin.label) {
+    val dark = isSystemInDarkTheme()
+    val scheme = MaterialTheme.colorScheme
+    val (container, content) = when (origin) {
+        // Fixed, not the theme's secondary: that follows the wallpaper and can land on any other tag's hue.
+        Origin.Sent -> if (dark) Color(0xFF2A3440) to Color(0xFFD5DEE8) else Color(0xFFDDE3EA) to Color(0xFF2B3A4A)
+        Origin.Received -> if (dark) Color(0xFF16314F) to Color(0xFFCFE2FA) else Color(0xFFD6E6FA) to Color(0xFF0F3E78)
+        Origin.Command -> if (dark) Color(0xFF332452) to Color(0xFFE3D6FA) else Color(0xFFE6DDF7) to Color(0xFF3B2470)
+        Origin.Server -> if (dark) Color(0xFF0F3A37) to Color(0xFFC4EFEA) else Color(0xFFCDEDEA) to Color(0xFF0A4540)
+        Origin.Local, Origin.Sim -> scheme.surfaceVariant to scheme.onSurfaceVariant
+    }
+    Tag(text, container, content)
+}
+
+/** A small label: the card's own text is the content, so this stays at the size of a caption. */
+@Composable
+fun Tag(text: String, container: Color, content: Color) {
+    Surface(color = container, contentColor = content, shape = RoundedCornerShape(6.dp)) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+        )
+    }
 }
 
 @Composable
