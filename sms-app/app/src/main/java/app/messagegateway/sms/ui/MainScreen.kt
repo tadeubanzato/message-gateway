@@ -1,12 +1,6 @@
 package app.messagegateway.sms.ui
 
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -22,11 +16,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.activity.compose.BackHandler
 
 private enum class Tab(val label: String, val icon: ImageVector) {
-    Home("Home", Icons.Filled.Home),
-    Messages("Messages", Icons.AutoMirrored.Filled.Send),
-    Inbox("Inbox", Icons.Filled.Email),
-    Webhooks("Webhooks", Icons.Filled.Share),
-    Settings("Settings", Icons.Filled.Settings),
+    Home("Home", NavHomeIcon),
+    Messages("Messages", NavMessagesIcon),
+    Webhooks("Webhooks", NavWebhooksIcon),
+    Settings("Settings", NavSettingsIcon),
 }
 
 @Composable
@@ -56,7 +49,6 @@ fun MainScreen(vm: AppViewModel) {
             showCloud -> CloudScreen(vm, onBack = { showCloud = false }, modifier = modifier)
             tab == Tab.Home -> HomeScreen(vm, onOpenCloud = { showCloud = true }, modifier = modifier)
             tab == Tab.Messages -> MessagesScreen(vm, modifier)
-            tab == Tab.Inbox -> InboxScreen(vm, modifier)
             tab == Tab.Webhooks -> WebhooksScreen(vm, modifier)
             else -> SettingsScreen(vm, onOpenLogs = { showLogs = true }, onOpenCloud = { showCloud = true }, modifier = modifier)
         }

@@ -22,6 +22,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -240,11 +242,16 @@ fun HomeScreen(vm: AppViewModel, onOpenCloud: () -> Unit, modifier: Modifier = M
 @Composable
 internal fun PasswordRow(password: String, context: Context, onNew: (() -> Unit)?) {
     var shown by remember { mutableStateOf(false) }
-    CopyRow("Password", if (shown) password else "•".repeat(12), context, copyValue = password)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilledTonalButton({ shown = !shown }) { Text(if (shown) "Hide" else "Show") }
-        if (onNew != null) TextButton(onClick = onNew) { Text("New password") }
-    }
+    CopyRow(
+        "Password", if (shown) password else "•".repeat(12), context, copyValue = password,
+        extra = {
+            SmallIconButton(
+                if (shown) EyeOpenIcon else EyeClosedIcon,
+                if (shown) "Hide password" else "Show password",
+            ) { shown = !shown }
+        },
+    )
+    if (onNew != null) TextButton(onClick = onNew) { Text("New password") }
 }
 
 /** The cloud account's password, with a confirmed "New password" like the Local one has. */

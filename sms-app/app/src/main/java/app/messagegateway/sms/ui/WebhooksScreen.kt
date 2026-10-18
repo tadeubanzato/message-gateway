@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -14,6 +15,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -53,6 +56,8 @@ fun WebhooksScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        NeedsAttention(deliveries, onRetry = { vm.retryWebhooks() })
+
         if (groups.isEmpty()) {
             SectionCard("No webhooks yet") {
                 Text("Add an address, or turn on Incoming messages in your gateway and it appears here by itself.", style = MaterialTheme.typography.bodyMedium)
@@ -75,7 +80,6 @@ fun WebhooksScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
             TextButton({ vm.prefs.regenerateSigningKey(); signingKey = vm.prefs.webhookSigningKey }) { Text("Generate a new key") }
         }
 
-        RecentCalls(deliveries, onRetry = { vm.retryWebhooks() })
     }
 
     if (adding) AddWebhookDialog(vm) { adding = false }
@@ -106,10 +110,7 @@ private fun WebhookGroupCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(group.host, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Pill(
-                    if (group.fromServer) "From server" else "On this phone",
-                    MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (group.fromServer) OriginTag(Origin.Server, "From server") else OriginTag(Origin.Local, "On this phone")
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -119,18 +120,22 @@ private fun WebhookGroupCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 // The full address, secret included, is what gets copied.
-                TextButton({ copyToClipboard(context, "Webhook URL", group.url) }) { Text("Copy") }
+                SmallIconButton(ClipboardIcon, "Copy webhook URL") { copyToClipboard(context, "Webhook URL", group.url) }
             }
 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 group.events.forEach { e ->
-                    if (e.count > 1) Pill("${e.label} ×${e.count}", palette.warn.container, palette.warn.onContainer)
-                    else Pill(e.label, MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
+                    // A server's copies can't be removed here, so only a phone-side duplicate is worth flagging.
+                    if (e.count > 1 && !group.fromServer) Tag("${e.label} · registered ${e.count}×", palette.warn.container, palette.warn.onContainer)
+                    else EventTag(e.event, e.label)
                 }
             }
-            if (group.hasDuplicates) {
+            if (group.hasDuplicates && !group.fromServer) {
+                val twice = group.events.filter { it.count > 1 }.joinToString(" and ") { it.label }
                 Text(
-                    "The same event is registered more than once for this address. Remove the extra one so each text is announced once.",
+                    "$twice is registered more than once for this address, so each of those events is sent to it " +
+                        (if (group.fromServer) "twice. The copies are set up on your server; remove the extra one there."
+                        else "twice. Remove this webhook and add it again to get one."),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -159,6 +164,12 @@ private fun WebhookGroupCard(
                 )
             }
 
+            var showCalls by remember { mutableStateOf(false) }
+            if (calls.isNotEmpty()) {
+                TextButton({ showCalls = !showCalls }) { Text(if (showCalls) "Hide recent calls" else "Show recent calls") }
+            }
+            if (showCalls) calls.sortedByDescending { it.createdAt }.take(5).forEach { CallRow(it, showHost = false) }
+
             if (group.fromServer) {
                 Text("Managed on your server, so it can't be removed here.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
@@ -168,32 +179,69 @@ private fun WebhookGroupCard(
     }
 }
 
+/** How far back a failed call still counts as something to look at. */
+private const val FAILED_WINDOW_MS = 24 * 60 * 60 * 1000L
+private const val ATTENTION_SHOWN = 5
+
+/** Calls still being retried, and ones that gave up today. Nothing shows while every call has gone through. */
 @Composable
-private fun RecentCalls(deliveries: List<WebhookDeliveryEntity>, onRetry: () -> Unit) {
-    SectionCard("Recent calls") {
-        if (deliveries.isEmpty()) Text("Nothing sent yet.", style = MaterialTheme.typography.bodyMedium)
-        deliveries.take(10).forEach { d ->
-            val ok = d.state == WebhookDeliveryEntity.DELIVERED
-            val failed = d.state == WebhookDeliveryEntity.FAILED
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(WebhookGroups.label(d.event), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                    Pill(
-                        d.state,
-                        if (ok) MaterialTheme.colorScheme.primaryContainer else if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.tertiaryContainer,
-                        if (ok) MaterialTheme.colorScheme.onPrimaryContainer else if (failed) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onTertiaryContainer,
-                    )
-                }
-                Text(
-                    formatTime(d.createdAt) +
-                        (if (!ok) " · attempt ${d.attempts}/${WebhookService.MAX_ATTEMPTS}" else "") +
-                        (d.lastError?.let { " · $it" } ?: ""),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+private fun NeedsAttention(deliveries: List<WebhookDeliveryEntity>, onRetry: () -> Unit) {
+    val now = System.currentTimeMillis()
+    val trouble = deliveries.filter {
+        it.state == WebhookDeliveryEntity.PENDING ||
+            (it.state == WebhookDeliveryEntity.FAILED && now - it.createdAt < FAILED_WINDOW_MS)
+    }.sortedByDescending { it.createdAt }
+    if (trouble.isEmpty()) return
+
+    SectionCard("Needs attention") {
+        Text(
+            "Calls that are still being retried, and ones that failed in the last 24 hours.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        trouble.take(ATTENTION_SHOWN).forEach { CallRow(it, showHost = true) }
+        if (trouble.size > ATTENTION_SHOWN) {
+            Text(
+                "and ${trouble.size - ATTENTION_SHOWN} more",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        if (deliveries.any { it.state == WebhookDeliveryEntity.PENDING }) TextButton(onRetry) { Text("Retry now") }
+        if (trouble.any { it.state == WebhookDeliveryEntity.PENDING }) TextButton(onRetry) { Text("Retry now") }
+    }
+}
+
+/** One call: what happened, how it ended, and when. Unfinished calls also show the attempt and the error. */
+@Composable
+private fun CallRow(d: WebhookDeliveryEntity, showHost: Boolean) {
+    val ok = d.state == WebhookDeliveryEntity.DELIVERED
+    val failed = d.state == WebhookDeliveryEntity.FAILED
+    val status = LocalStatusPalette.current
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(WebhookGroups.label(d.event), style = MaterialTheme.typography.titleSmall)
+            if (showHost) {
+                Text(
+                    "to " + WebhookGroups.hostOf(d.url),
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
+            val style = status.of(if (ok) Level.Good else if (failed) Level.Bad else Level.Warn)
+            Tag(d.state, style.container, style.onContainer)
+        }
+        Text(
+            formatTime(d.createdAt) +
+                (if (!ok) " · attempt ${d.attempts}/${WebhookService.MAX_ATTEMPTS}" else "") +
+                (d.lastError?.let { " · $it" } ?: ""),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -230,4 +278,16 @@ private fun AddWebhookDialog(vm: AppViewModel, onDismiss: () -> Unit) {
         },
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
     )
+}
+
+/** An event a webhook listens for, in the same colors the message cards use for it. */
+@Composable
+private fun EventTag(event: String, label: String) {
+    val status = LocalStatusPalette.current
+    when (event) {
+        "sms:received" -> OriginTag(Origin.Received, label)
+        "sms:delivered" -> Tag(label, status.good.container, status.good.onContainer)
+        "sms:failed" -> Tag(label, status.bad.container, status.bad.onContainer)
+        else -> OriginTag(Origin.Sent, label)
+    }
 }

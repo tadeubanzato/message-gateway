@@ -153,18 +153,19 @@ fun TrendsCard(vm: AppViewModel, modifier: Modifier = Modifier) {
     }
 }
 
-/** A compact one-of-N switch. The check icon is dropped and the padding trimmed so the labels fit on a narrow phone. */
+/** A compact one-of-N switch: no check icon, trimmed padding, a 32dp bar and caption-size labels. */
 @Composable
 private fun Segmented(labels: List<String>, selectedIndex: Int, modifier: Modifier, onSelect: (Int) -> Unit) {
     SingleChoiceSegmentedButtonRow(modifier) {
         labels.forEachIndexed { i, label ->
             SegmentedButton(
+                modifier = Modifier.height(32.dp),
                 selected = i == selectedIndex,
                 onClick = { onSelect(i) },
                 shape = SegmentedButtonDefaults.itemShape(i, labels.size),
                 icon = {},
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp),
-                label = { Text(label, maxLines = 1) },
+                label = { Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
             )
         }
     }
