@@ -193,7 +193,7 @@ second check, copy the app's *Settings → Webhooks → Signing key* into *Webho
 
 *Text commands.* With incoming messages on, the **Text commands** card on the SMS page lets chosen
 phone numbers control the gateway by text. List the numbers allowed (one per line, with or without
-the country code - `+1 857 707 5969` and `8577075969` both match the same sender) and tick the
+the country code - `+1 555 010 0123` and `5550100123` both match the same sender) and tick the
 commands to allow:
 
 | Command | Reply |

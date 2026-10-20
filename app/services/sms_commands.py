@@ -182,7 +182,7 @@ def allowed_numbers() -> list[str]:
 
 def sender_allowed(sender: Optional[str]) -> bool:
     """An entry matches when one number ends with the other's digits, so a number
-    saved without its country code (8577075969) still matches +18577075969, and a
+    saved without its country code (5550100123) still matches +15550100123, and a
     sender shown without one still matches an entry saved with it."""
     digits = _digits(sender)
     if len(digits) < _MIN_NUMBER_DIGITS:
