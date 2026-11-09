@@ -20,7 +20,7 @@ from app.routes.onboarding import router as onboarding_router
 from app.routes.portal import router as portal_router
 from app.routes.portal_ui import router as portal_ui_router
 from app.routes.smsgate_proxy import router as smsgate_proxy_router
-from app.services import access, channels, email_templates, html_safe, key_check, message_log, sms_commands, smsgate_server
+from app.services import access, channels, email_templates, html_safe, key_check, message_log, phone_watchdog, sms_commands, smsgate_server
 from app.services.env import public_base_url
 from app.version import APP_NAME, APP_VERSION
 from app.schemas import EmailMessage, EmailTemplateMessage, MessageEnqueued, PushMessage, SmsMessage, SmsTemplateMessage, TelegramMessage, WhatsAppMessage, MessageRequest, MessageResponse
@@ -71,6 +71,7 @@ async def _lifespan(app: FastAPI):
     except Exception:
         pass  # a diagnostic must never stop the gateway from starting
     threading.Thread(target=_purge_loop, name="log-purge", daemon=True).start()
+    threading.Thread(target=phone_watchdog.watch_loop, name="phone-watchdog", daemon=True).start()
     async with mcp.session_manager.run():
         yield
 

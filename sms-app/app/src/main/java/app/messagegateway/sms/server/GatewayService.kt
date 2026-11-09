@@ -20,12 +20,16 @@ import app.messagegateway.sms.AppContainer
 import app.messagegateway.sms.MainActivity
 import app.messagegateway.sms.R
 import app.messagegateway.sms.core.error
+import app.messagegateway.sms.cloud.CloudState
 import app.messagegateway.sms.core.info
+import app.messagegateway.sms.core.warn
 import app.messagegateway.sms.send.CloudSyncWorker
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 sealed interface ServerState {
@@ -45,6 +49,7 @@ class GatewayService : Service() {
     private var server: EmbeddedServer<*, *>? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var heartbeat: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -79,7 +84,42 @@ class GatewayService : Service() {
         if (prefs.cloudEnabled) container.cloud.start() else container.cloud.stop()
         CloudSyncWorker.schedule(this, prefs.cloudEnabled)
         acquireLocks()
+        if (prefs.cloudEnabled) startHeartbeat() else stopHeartbeat()
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
+    }
+
+    /**
+     * A phone that quietly stops working is hard to diagnose after a restart, because nothing says when it stopped.
+     * Every few minutes this writes a line to the app log (which survives restarts), and it also restarts the cloud
+     * connection if that has stopped, or has been stuck "connecting" for too long.
+     */
+    private fun startHeartbeat() {
+        if (heartbeat?.isActive == true) return
+        heartbeat = container.scope.launch(Dispatchers.Default) {
+            var connectingSince: Long? = null
+            var beats = 0
+            while (true) {
+                delay(CHECK_EVERY_MS)
+                val now = System.currentTimeMillis()
+                val state = container.cloud.state.value
+                connectingSince = if (state is CloudState.Connecting) connectingSince ?: now else null
+                val stuck = connectingSince?.let { now - it > STUCK_AFTER_MS } == true
+                if (!container.cloud.running || stuck) {
+                    container.log.warn(TAG, "Cloud connection was ${if (stuck) "stuck connecting" else "not running"}; restarting it")
+                    container.cloud.stop()
+                    container.cloud.start()
+                    connectingSince = null
+                }
+                if (++beats % BEATS_PER_LOG == 0) {
+                    container.log.info(TAG, "Heartbeat: cloud ${state::class.simpleName}, wake lock ${wakeLock?.isHeld == true}")
+                }
+            }
+        }
+    }
+
+    private fun stopHeartbeat() {
+        heartbeat?.cancel()
+        heartbeat = null
     }
 
     private fun enterForeground() {
@@ -157,6 +197,7 @@ class GatewayService : Service() {
     }
 
     override fun onDestroy() {
+        stopHeartbeat()
         stopServer()
         container.cloud.stop()
         CloudSyncWorker.schedule(this, false)
@@ -170,6 +211,9 @@ class GatewayService : Service() {
 
     companion object {
         private const val TAG = "GatewayService"
+        private const val CHECK_EVERY_MS = 5 * 60_000L
+        private const val STUCK_AFTER_MS = 6 * 60_000L
+        private const val BEATS_PER_LOG = 3 // one log line every 15 minutes
         private const val CHANNEL_ID = "server"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP = "app.messagegateway.sms.STOP"

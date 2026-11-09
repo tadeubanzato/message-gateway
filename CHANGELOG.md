@@ -25,6 +25,9 @@ project uses [Semantic Versioning](https://semver.org/).
   when a template is rendered, so templates saved earlier are cleaned without re-saving.
 
 ### Added
+- **A phone watchdog.** The gateway now checks the SMSGate phone's last check-in every minute and sends a push
+  notification when it has been silent for 30 minutes (and again when it is back), so a frozen or disconnected phone
+  no longer goes unnoticed while texts queue up. Tune or disable it with `PHONE_WATCHDOG*` (see `.env.example`).
 - **An Android app for the SMSGate phone, in `sms-app/`.** A Kotlin / Jetpack Compose app that turns a phone into an
   SMS gateway and works with the SMSGate server this gateway already uses, so the gateway needs no change: put the
   app's username and password in the SMSGate fields. It has a local API on the phone, a cloud mode over the server's
